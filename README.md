@@ -47,6 +47,7 @@ Win10+、WebView2 或 Electron。WIN7 Harness 的目标是：
 从仓库 [`release/`](release/) 下载 `WIN7Harness-v1.38.1-win7.zip`（内含安装包、双架构 exe、使用说明和 LICENSE）：
 
 - 直接下载：<https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-win7.zip>
+- 源码包：<https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-source.zip>
 - 也可以从 [Releases](https://github.com/MC5lan/WIN7Harness/releases) 页面查看版本说明
 
 解压后双击 `WIN7Harness-v1.38.1-Setup.exe`：
