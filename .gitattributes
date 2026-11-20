@@ -1,0 +1,12 @@
+# Windows 脚本必须保持 CRLF，避免 cmd/PowerShell 解析异常
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Unix 脚本与 Go 源码保持 LF
+*.sh    text eol=lf
+*.go    text eol=lf
+*.md    text eol=lf
+
+# Win7 记事本友好：说明文档保持 CRLF
+*.txt   text eol=crlf

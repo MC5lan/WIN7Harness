@@ -1,0 +1,42 @@
+# 发布与构建产物
+/dist/
+/eval-out/
+/bench-out/
+/rsi-out/
+/.rsi/
+*.exe
+*.syso
+*.zip
+
+# 本地渲染/截图/评测二进制（源码仓库不提交）
+/_render/
+/shots/
+/evalrun
+docs/*.png
+
+# 运行时数据（绝不提交）
+sessions/
+snapshots/
+selftest/
+attachments/
+updates/
+crash/
+exports/
+data/
+harness.log
+harness.log.1
+last_run.json
+codeindex.json
+config.json
+
+# 密钥与更新私钥
+keys/
+*.key
+update_private.key
+update_public.key
+
+# 临时文件
+temp/
+output/
+__pycache__/
+*.bak

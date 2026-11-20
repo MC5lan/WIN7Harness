@@ -1,0 +1,388 @@
+package core
+
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+)
+
+// 自更新闭环：v1.28 之前 /update 只做到"下载 + 校验 SHA256"，
+// 剩下的替换 exe、重启、清理旧文件全靠人手。
+// 这里补上最后一公里，并且刻意保留一条"失败可回滚"的退路：
+// 脚本先把自己改名成 .old，新文件搬到位后才真删 .old；
+// 中途任何一步失败，脚本会把 .old 改回来，程序仍是能跑的那一版。
+
+// SelfExePath 返回当前可执行文件的绝对路径。
+func SelfExePath() (string, error) {
+	p, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(p)
+}
+
+// InstallDirWritable 判断当前 exe 所在目录是否可写。
+// 装到 Program Files（所有用户）时普通用户不可写，应用内替换 exe 会失败；
+// 升级流程据此改为“请运行新版安装包”。
+func InstallDirWritable() bool {
+	exe, err := SelfExePath()
+	if err != nil {
+		return false
+	}
+	f, err := os.CreateTemp(filepath.Dir(exe), ".wh-write-test-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// InstallMode 返回安装形态：standard-user / standard-all / portable。
+// 安装器会在程序目录写 install-mode.txt；没有标记时按当前用户标准安装处理。
+// 结果在进程内缓存，避免设置页每帧读盘。
+var (
+	installModeOnce   sync.Once
+	installModeCached string
+)
+
+func InstallMode() string {
+	installModeOnce.Do(func() {
+		installModeCached = detectInstallMode()
+	})
+	return installModeCached
+}
+
+func detectInstallMode() string {
+	if PortableMode() {
+		return "portable"
+	}
+	if exe, err := SelfExePath(); err == nil {
+		if b, err := os.ReadFile(filepath.Join(filepath.Dir(exe), "install-mode.txt")); err == nil {
+			switch strings.TrimSpace(string(b)) {
+			case "standard-all", "standard-user":
+				return strings.TrimSpace(string(b))
+			}
+		}
+	}
+	return "standard-user"
+}
+
+// ExeArch 从 PE 头读出目标架构，用于拦截"拿错架构的包替换自己"。
+// 返回值：amd64 / 386 / arm64 / unknown。
+func ExeArch(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// 读 16KB 头：覆盖 DOS stub 较大的合法 PE（部分数字签名/GUI 包的 stub 超过 4KB）
+	head := make([]byte, 16384)
+	n, err := f.Read(head)
+	if err != nil && n < 64 {
+		return "", err
+	}
+	head = head[:n]
+	if len(head) < 0x40 || head[0] != 'M' || head[1] != 'Z' {
+		return "", errors.New("不是有效的 PE 文件：缺少 MZ 头")
+	}
+	off := int(binary.LittleEndian.Uint32(head[0x3c:0x40]))
+	if off <= 0 || off+24 > len(head) {
+		return "", errors.New("PE 头偏移越界，文件可能已损坏")
+	}
+	if head[off] != 'P' || head[off+1] != 'E' || head[off+2] != 0 || head[off+3] != 0 {
+		return "", errors.New("不是有效的 PE 文件：缺少 PE 签名")
+	}
+	machine := binary.LittleEndian.Uint16(head[off+4 : off+6])
+	switch machine {
+	case 0x8664:
+		return "amd64", nil
+	case 0x014c:
+		return "386", nil
+	case 0xaa64:
+		return "arm64", nil
+	default:
+		return "unknown", nil
+	}
+}
+
+// CheckUpdateArch 校验待替换的 exe 与当前进程架构一致。
+func CheckUpdateArch(newExe, wantArch string) error {
+	if wantArch == "" {
+		wantArch = runtime.GOARCH
+	}
+	got, err := ExeArch(newExe)
+	if err != nil {
+		return err
+	}
+	if got == "unknown" {
+		return errors.New("无法识别新包的架构，为安全起见不替换")
+	}
+	if got != wantArch {
+		return fmt.Errorf("架构不匹配：当前 %s，新包 %s。换错架构的程序会直接起不来", wantArch, got)
+	}
+	return nil
+}
+
+// applyWaitTries 是脚本等待旧进程退出的最大重试次数（每次约 1 秒）。
+const applyWaitTries = 30
+
+// ApplyScript 生成 Windows 替换脚本。
+// 不用 PowerShell（Win7 上可能被策略拦），只用 cmd 内建命令 + ping 做退避。
+func ApplyScript(exePath, newExe string, relaunch bool) string {
+	var b strings.Builder
+	b.WriteString("@echo off\r\n")
+	b.WriteString("setlocal\r\n")
+	// set "VAR=value" 是 cmd 里唯一安全的带引号赋值：
+	// 整个 VAR=value 被引号包住，值里不再需要二次引号，
+	// 含空格路径（C:\Program Files\...）下替换成功；也不受 % 展开干扰。
+	b.WriteString("set \"TARGET=" + batValue(exePath) + "\"\r\n")
+	b.WriteString("set \"NEW=" + batValue(newExe) + "\"\r\n")
+	b.WriteString("set \"OLD=%TARGET%.old\"\r\n")
+	b.WriteString("set TRIES=0\r\n")
+	b.WriteString(":wait\r\n")
+	b.WriteString("move /y \"%TARGET%\" \"%OLD%\" >nul 2>&1\r\n")
+	b.WriteString("if not errorlevel 1 goto swap\r\n")
+	b.WriteString("set /a TRIES+=1\r\n")
+	b.WriteString(fmt.Sprintf("if %%TRIES%% geq %d goto giveup\r\n", applyWaitTries))
+	b.WriteString("ping -n 2 127.0.0.1 >nul\r\n")
+	b.WriteString("goto wait\r\n")
+	b.WriteString(":swap\r\n")
+	b.WriteString("move /y \"%NEW%\" \"%TARGET%\" >nul 2>&1\r\n")
+	b.WriteString("if errorlevel 1 goto rollback\r\n")
+	if relaunch {
+		b.WriteString("start \"\" \"%TARGET%\"\r\n")
+	}
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 0\r\n")
+	b.WriteString(":rollback\r\n")
+	b.WriteString("move /y \"%OLD%\" \"%TARGET%\" >nul 2>&1\r\n")
+	b.WriteString("echo 替换失败，已回滚到原版本。 >\"%~dp0update_failed.txt\"\r\n")
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 1\r\n")
+	b.WriteString(":giveup\r\n")
+	b.WriteString("echo 替换脚本没有能移动文件（程序占用或路径含特殊字符），原版本未受影响。 >\"%~dp0update_failed.txt\"\r\n")
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 2\r\n")
+	return b.String()
+}
+
+// batValue 给 batch set 的值做转义：去掉引号、% 翻倍
+// （batch 里 %% 才表示一个字面量 %）。
+func batValue(p string) string {
+	p = strings.ReplaceAll(p, "\"", "")
+	p = strings.ReplaceAll(p, "%", "%%")
+	return p
+}
+
+// WriteApplyScript 把替换脚本写进 dir，返回脚本绝对路径。
+func WriteApplyScript(dir, script string) (string, error) {
+	if dir == "" {
+		dir = UpdatesDir()
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("apply-%d.bat", time.Now().UnixNano())
+	p := filepath.Join(dir, name)
+	if err := WriteFileAtomic(p, []byte(script), 0o644); err != nil {
+		return "", err
+	}
+	return p, nil
+}
+
+// CleanupOldExe 清理上一版 .old（启动时调用）。
+// 关键修复（CR-P1-2）：此前**无条件删除**——新版首次启动就把唯一的回滚副本删了，
+// 换上的包要是起不来，用户就再无退路。现在只清理 30 天以上的 .old：
+// 最近一份永远保留，作为"新版本起不来时人工回滚"的唯一后悔药。
+// .old 文件名固定为 <当前exe名>.old，每次自更新覆盖同名文件，不会无限堆积。
+func CleanupOldExe(dir string) int {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	self, err := SelfExePath()
+	if err != nil {
+		return 0
+	}
+	base := filepath.Base(self)
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, base) || !strings.HasSuffix(name, ".old") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(cutoff) {
+			continue // 保留：回滚副本
+		}
+		if os.Remove(filepath.Join(dir, name)) == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+// PendingUpdate 读走上次替换失败留下的标记（update_failed.txt），读后即删。
+func PendingUpdate(dir string) string {
+	if dir == "" {
+		dir = UpdatesDir()
+	}
+	p := filepath.Join(dir, "update_failed.txt")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return ""
+	}
+	_ = os.Remove(p)
+	return strings.TrimSpace(string(b))
+}
+
+// PrepareUpdate 准备更新目录：目录不存在就建。
+// 同一版本的包会被下一次下载直接覆盖，不会无限堆积。
+func PrepareUpdate(dir string) error {
+	if dir == "" {
+		dir = UpdatesDir()
+	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+// ExeArchOfSelf 当前程序自身的架构（386 / amd64）。
+func ExeArchOfSelf() string {
+	self, err := SelfExePath()
+	if err != nil {
+		return ""
+	}
+	arch, err := ExeArch(self)
+	if err != nil {
+		return ""
+	}
+	return arch
+}
+
+// StageUpdate 把"已下载待替换"的包登记下来，下次启动若发现还没换成功可以提示。
+func StageUpdate(dir, newExe string) error {
+	if dir == "" {
+		dir = UpdatesDir()
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return WriteFileAtomic(filepath.Join(dir, "pending_update.txt"), []byte(newExe), 0o644)
+}
+
+// PendingUpdateExe 读回上次登记的待替换包路径（不存在返回空串）。
+func PendingUpdateExe(dir string) string {
+	if dir == "" {
+		dir = UpdatesDir()
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "pending_update.txt"))
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(string(b))
+	if !fileExists(p) {
+		return ""
+	}
+	return p
+}
+
+// LaunchApply 用 cmd 启动替换脚本。脚本自己会等本进程退出再动手，
+// 所以这里不阻塞、也不关心返回值。
+func LaunchApply(script string) error {
+	if script == "" {
+		return errors.New("脚本路径为空")
+	}
+	cmd := exec.Command("cmd", "/c", "start", "", script)
+	cmd.SysProcAttr = hiddenProcAttr()
+	return cmd.Start()
+}
+
+// RevertInfo 描述一次可回退的状态（当前版本之前的那一版）。
+type RevertInfo struct {
+	OldPath string
+	OldArch string
+	OldSize int64
+	OldMod  time.Time
+}
+
+// PrepareRevert 检查回退前置条件：当前 exe 旁边有 .old，且它是合法 PE。
+// .old 是更新器保留的上一版（<exe>.old），30 天后由 CleanupOldExe 自动清理。
+func PrepareRevert() (RevertInfo, error) {
+	self, err := SelfExePath()
+	if err != nil {
+		return RevertInfo{}, fmt.Errorf("拿不到自身路径：%v", err)
+	}
+	return PrepareRevertFrom(self)
+}
+
+// PrepareRevertFrom 分离出来便于测试：从任意 exe 路径算出对应 .old。
+func PrepareRevertFrom(exePath string) (RevertInfo, error) {
+	oldPath := exePath + ".old"
+	fi, err := os.Stat(oldPath)
+	if err != nil {
+		return RevertInfo{}, fmt.Errorf("没有可回退的版本：上一版 %s 不存在（更新成功后更新器会保留 30 天，之后自动清理）", filepath.Base(oldPath))
+	}
+	if fi.Size() < 1<<20 {
+		return RevertInfo{}, fmt.Errorf("回滚副本异常（仅 %d 字节），放弃回退", fi.Size())
+	}
+	arch, err := ExeArch(oldPath)
+	if err != nil {
+		return RevertInfo{}, fmt.Errorf("回滚副本不是有效的 Windows PE 文件：%v", err)
+	}
+	return RevertInfo{OldPath: oldPath, OldArch: arch, OldSize: fi.Size(), OldMod: fi.ModTime()}, nil
+}
+
+// RevertScript 生成“回退到 .old 版本”替换脚本。
+// 思路与 ApplyScript 相同：等本进程退出，把当前 exe 临时改名为 .new，
+// 把 .old 改名回原路径，然后重启；失败时把 .new 改回当前版本，
+// 保证任何时候都已知自己跑的是哪个版本（不会变砖）。
+func RevertScript(exePath string, relaunch bool) string {
+	var b strings.Builder
+	b.WriteString("@echo off\r\n")
+	b.WriteString("setlocal\r\n")
+	b.WriteString("set \"TARGET=" + batValue(exePath) + "\"\r\n")
+	b.WriteString("set \"OLD=%TARGET%.old\"\r\n")
+	b.WriteString("set \"NEW=%TARGET%.new\"\r\n")
+	b.WriteString("set TRIES=0\r\n")
+	b.WriteString(":wait\r\n")
+	b.WriteString("move /y \"%TARGET%\" \"%NEW%\" >nul 2>&1\r\n")
+	b.WriteString("if not errorlevel 1 goto swap\r\n")
+	b.WriteString("set /a TRIES+=1\r\n")
+	b.WriteString(fmt.Sprintf("if %%TRIES%% geq %d goto giveup\r\n", applyWaitTries))
+	b.WriteString("ping -n 2 127.0.0.1 >nul\r\n")
+	b.WriteString("goto wait\r\n")
+	b.WriteString(":swap\r\n")
+	b.WriteString("move /y \"%OLD%\" \"%TARGET%\" >nul 2>&1\r\n")
+	b.WriteString("if errorlevel 1 goto rollback\r\n")
+	if relaunch {
+		b.WriteString("start \"\" \"%TARGET%\"\r\n")
+	}
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 0\r\n")
+	b.WriteString(":rollback\r\n")
+	b.WriteString("move /y \"%NEW%\" \"%TARGET%\" >nul 2>&1\r\n")
+	b.WriteString("echo 回退失败，已回滚到当前版本。 >\"%~dp0update_failed.txt\"\r\n")
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 1\r\n")
+	b.WriteString(":giveup\r\n")
+	b.WriteString("echo 回退脚本没有能移动文件，程序保持现状。 >\"%~dp0update_failed.txt\"\r\n")
+	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+	b.WriteString("exit /b 2\r\n")
+	return b.String()
+}
