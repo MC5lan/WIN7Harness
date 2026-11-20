@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <img src="assets/logo.png" alt="WIN7 Harness 图标" width="28">
   <img src="https://img.shields.io/badge/Windows-7%20SP1-0078D6?style=flat-square&logo=windows" alt="Windows 7 SP1">
   <img src="https://img.shields.io/badge/Go-1.20.14-00ADD8?style=flat-square&logo=go" alt="Go 1.20.14">
   <img src="https://img.shields.io/github/v/release/MC5lan/WIN7Harness?style=flat-square&color=E0663B" alt="Latest release">
