@@ -44,7 +44,12 @@ Win10+、WebView2 或 Electron。WIN7 Harness 的目标是：
 
 ### 方式一：安装包（推荐）
 
-从 **Releases** 下载 `WIN7Harness-v1.38.1-Setup.exe`，双击后：
+从仓库 [`release/`](release/) 下载 `WIN7Harness-v1.38.1-win7.zip`（内含安装包、双架构 exe、使用说明和 LICENSE）：
+
+- 直接下载：<https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-win7.zip>
+- 也可以从 [Releases](https://github.com/MC5lan/WIN7Harness/releases) 页面查看版本说明
+
+解压后双击 `WIN7Harness-v1.38.1-Setup.exe`：
 
 1. 选择安装范围：仅当前用户（免管理员）或所有用户（Program Files + UAC）
 2. 选择安装方式：标准安装 / 便携安装（U 盘）
