@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,9 @@ func TestPrepareRevertFromMissingOld(t *testing.T) {
 }
 
 func TestPrepareRevertFromValidOld(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("需要 Windows PE 作为夹具：os.Executable() 在非 Windows 上是 ELF")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Skipf("无法确定测试二进制路径：%v", err)
