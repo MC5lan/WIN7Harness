@@ -68,3 +68,33 @@ Win32 导出函数自检通过（118 个）
 3. 新增的 proc 变量会自动被 `SelfCheck` 覆盖（它按变量声明扫描生成），
    不用额外登记。
 4. 新调用一律用 `pcall`，不要直写 `.Call(`。
+
+## 6. unsafe.Pointer 与 syscall
+
+`GOOS=windows go vet ./...` 在 v1.38.1 上报告 35 处
+`possible misuse of unsafe.Pointer`，全部集中在 `internal/win32` 与 `internal/ui`
+的 Win32 / COM 互操作处。这些不是可以靠改代码消除的缺陷，而是 syscall 互操作的固有形态：
+
+- **指针来源是操作系统，不是 Go 堆**：`HWND`、`WM_*` 的 `lParam`、`GlobalLock`
+  返回的内存、COM 接口指针与调用方传入的 out 参数（`ppv`、`psz`、`pvar`），
+  生命周期由 Windows 或调用方管理。Go 的 GC 不移动也不回收它们。
+- **`unsafe.Pointer(uintptr)` 是唯一可行的转换**：Windows 返回的是整数句柄/地址，
+  要按结构体或切片访问只能这样转。改成 `uintptr` 运算反而更危险。
+- **真正的风险只有一种**：把 **Go 堆对象** 的 `uintptr(unsafe.Pointer(p))`
+  存进变量，跨语句后再传给 syscall。Go 的规则要求转换与调用在同一表达式内完成，
+  并在调用后 `runtime.KeepAlive`。
+
+本轮按这个标准逐个核对了 35 处，并额外修掉一处未被 vet 捕获的真实风险：
+`internal/win32/single.go` 的 `ActivateWindow` 曾把 `UTF16PtrFromString` 返回的
+Go 堆指针先存成 `uintptr`，再调用 `FindWindowW`。现已改为调用点内联转换 +
+`runtime.KeepAlive(cp/tp)`。
+
+因此 CI 使用：
+
+```bash
+GOOS=windows go vet -unsafeptr=false ./...
+```
+
+`-unsafeptr=false` 只关闭“uintptr→unsafe.Pointer 可能无效”的启发式检查，
+不会掩盖其它 vet 问题。不要用 `//nolint`（vet 不认），也不要把所有
+`unsafe.Pointer` 批量替换成 `uintptr`。

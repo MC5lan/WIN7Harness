@@ -3,6 +3,7 @@
 package win32
 
 import (
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -55,14 +56,11 @@ func ActivateWindow(className, title string) bool {
 	if title != "" {
 		tp, _ = syscall.UTF16PtrFromString(title)
 	}
-	var a, b uintptr
-	if cp != nil {
-		a = uintptr(unsafe.Pointer(cp))
-	}
-	if tp != nil {
-		b = uintptr(unsafe.Pointer(tp))
-	}
-	h, _, _ := pcall(pFindWindowW, a, b)
+	// 转换与 syscall 必须在同一表达式内，调用后再 KeepAlive：
+	// cp/tp 是 Go 堆上的 UTF-16 缓冲区，不能先存成 uintptr 跨语句使用。
+	h, _, _ := pcall(pFindWindowW, uintptr(unsafe.Pointer(cp)), uintptr(unsafe.Pointer(tp)))
+	runtime.KeepAlive(cp)
+	runtime.KeepAlive(tp)
 	if h == 0 {
 		return false
 	}
