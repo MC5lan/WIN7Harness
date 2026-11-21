@@ -507,6 +507,31 @@ func (w *Window) SetTitle(t string) {
 // Quit 退出消息循环。
 func (w *Window) Quit() { win32.PostQuitMessage(0) }
 
+// proc 窗口消息清单（Win7 SP1 与 Win10/11 共用；未列出的消息统一交给 DefWindowProc）：
+//
+//	WM_ERASEBKGND                         阻止系统擦背景，避免闪烁
+//	WM_SIZE / WM_ACTIVATE / WM_SHOWWINDOW 尺寸、激活、显示变化后强制整块重贴
+//	WM_PAINT                              差分脏区绘制，必要时整块重贴
+//	WM_DROPFILES                          拖入文件/图片
+//	snipMsg                               PrintScreen 钩子回调
+//	WM_GETOBJECT                           MSAA 可访问性对象
+//	WM_SETTINGCHANGE / WM_THEMECHANGED / WM_DISPLAYCHANGE 主题、DPI、显示器变化
+//	WM_TIMER                              心跳、动画、流式刷新
+//	WM_MOUSEMOVE / WM_MOUSELEAVE          悬停与鼠标离开
+//	WM_LBUTTONDOWN / UP / DBLCLK          左键单击、双击
+//	WM_RBUTTONDOWN / UP                   右键菜单
+//	WM_MOUSEWHEEL                         滚轮
+//	WM_KEYDOWN / WM_SYSKEYDOWN            快捷键与导航
+//	WM_CHAR / WM_IME_*                    文本输入与输入法组合
+//	WM_QUERYENDSESSION / WM_ENDSESSION    注销/关机前保存与清理
+//	WM_POWERBROADCAST / WM_WTSSESSION_CHANGE 休眠恢复、远程会话切换
+//	WM_SETCURSOR                          光标形状
+//	WM_GETMINMAXINFO                      最小窗口尺寸
+//	WM_CLOSE / WM_DESTROY                 关闭与退出
+//	TrayMsg                               托盘图标回调
+//
+// 拆分注意：Win7 与 Win10 的 WM_DPICHANGED、WM_GETMINMAXINFO 行为不同，
+// 改动消息顺序前必须在 Win7 SP1 实机回归；没有实机时保持本函数为唯一分发表。
 func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 	// 窗口回调是 Windows→Go 的入口：任何未捕获的 panic 都会穿过 cgo 边界
 	// 直接杀死进程，而且 GUI 子系统没有控制台——main() 的 recover 兜不住，
