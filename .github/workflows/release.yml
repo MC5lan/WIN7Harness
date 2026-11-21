@@ -68,6 +68,8 @@ jobs:
         with:
           files: |
             dist/WIN7Harness-v*-win7.zip
+            dist/WIN7Harness-amd64.exe
+            dist/WIN7Harness-386.exe
             dist/latest.json
             dist/SHA256SUMS.txt
           overwrite_files: true
