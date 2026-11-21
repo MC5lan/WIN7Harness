@@ -102,6 +102,12 @@ done
 echo "[4/5] 附带文件"
 cp -f build/win7harness.ico "$DIST/win7harness.ico"
 cp -f build/make-portable.bat "$DIST/make-portable.bat"
+# 许可证与归属文件必须随二进制分发（Apache-2.0 §4）。
+cp -f LICENSE "$DIST/LICENSE"
+cp -f NOTICE "$DIST/NOTICE"
+cp -f COMMERCIAL.md "$DIST/COMMERCIAL.md"
+cp -f THIRD_PARTY_NOTICES.md "$DIST/THIRD_PARTY_NOTICES.md"
+cp -f README.md "$DIST/README.md"
 printf '%s\r\n' "$VERSION" > "$DIST/version.txt"
 printf '      version.txt (%s)\r\n' "$VERSION"
 "$PY" - "$DIST" "$VERSION" <<'PY'
@@ -130,7 +136,7 @@ import sys, os, zipfile
 dist, out_dir, ver = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(out_dir, exist_ok=True)
 zp = os.path.join(out_dir, 'WIN7Harness-v%s-win7.zip' % ver)
-files = ['WIN7Harness-amd64.exe', 'WIN7Harness-386.exe', 'win7harness.ico', 'README.txt', 'make-portable.bat', 'setup.bat', 'version.txt']
+files = ['WIN7Harness-amd64.exe', 'WIN7Harness-386.exe', 'win7harness.ico', 'README.txt', 'README.md', 'LICENSE', 'NOTICE', 'COMMERCIAL.md', 'THIRD_PARTY_NOTICES.md', 'make-portable.bat', 'setup.bat', 'version.txt']
 with zipfile.ZipFile(zp, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for f in files:
         p = os.path.join(dist, f)

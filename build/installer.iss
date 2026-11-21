@@ -36,6 +36,7 @@ AppVersion={#MyAppVersion}
 AppVerName=WIN7 Harness {#MyAppVersion}
 AppPublisher=WIN7 Harness
 AppComments=Windows 7 SP1 上运行的本地 AI 编程智能体
+LicenseFile={#MySourceDir}\LICENSE
 DefaultDirName={code:GetDefaultDir}
 DefaultGroupName=WIN7 Harness
 DisableProgramGroupPage=yes
@@ -91,6 +92,11 @@ Source: "{#MySourceDir}\WIN7Harness-386.exe"; DestDir: "{app}"; DestName: "Win7H
 Source: "{#MyIcon}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MySourceDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#MySourceDir}\version.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MySourceDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MySourceDir}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MySourceDir}\COMMERCIAL.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MySourceDir}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "{#MySourceDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Dirs]
 ; 便携模式：整个程序目录和 data 目录允许本机其他用户修改。

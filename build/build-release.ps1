@@ -115,6 +115,11 @@ try {
 Write-Host "[3/5] 附带文件" -ForegroundColor Yellow
 Copy-Item (Join-Path $root "build\win7harness.ico") (Join-Path $Dist "win7harness.ico") -Force
 Copy-Item (Join-Path $root "build\make-portable.bat") (Join-Path $Dist "make-portable.bat") -Force
+# 许可证与归属文件必须随二进制分发（Apache-2.0 §4）。
+foreach ($doc in @("LICENSE", "NOTICE", "COMMERCIAL.md", "THIRD_PARTY_NOTICES.md", "README.md")) {
+    $src = Join-Path $root $doc
+    if (Test-Path $src) { Copy-Item $src (Join-Path $Dist $doc) -Force }
+}
 
 [IO.File]::WriteAllText((Join-Path $Dist "version.txt"), "$Version`r`n", [Text.Encoding]::ASCII)
 
