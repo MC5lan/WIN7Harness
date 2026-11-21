@@ -8,6 +8,7 @@
   <img src="https://img.shields.io/badge/Go-1.20.14-00ADD8?style=flat-square&logo=go" alt="Go 1.20.14">
   <img src="https://img.shields.io/github/v/release/MC5lan/WIN7Harness?style=flat-square&color=E0663B" alt="Latest release">
   <img src="https://img.shields.io/github/stars/MC5lan/WIN7Harness?style=flat-square&color=FFB300" alt="Stars">
+  <img src="https://github.com/MC5lan/WIN7Harness/actions/workflows/ci.yml/badge.svg" alt="CI">
   <img src="https://img.shields.io/github/license/MC5lan/WIN7Harness?style=flat-square&color=blue" alt="License">
 </p>
 
@@ -19,6 +20,12 @@
 > [!NOTE]
 > **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
 > 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
+>
+> **关于本仓库**：本仓库是 v1.38.1 的快照发布，早期迭代历史未提交到 git；
+> 各版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 `docs/`。
+
+> 上文的“零运行时依赖”指静态链接的单文件 exe。构建期依赖 Go 1.20.14 工具链与
+> `go.mod` 中列出的模块，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ---
 
@@ -254,7 +261,7 @@ scripts/              安装器回归、UI 回归、生命周期检查
 - 支持包 `config.redacted.json` 会清空 Key / 密文；分享前仍建议自己检查。
 - 更新清单支持 Ed25519 签名，下载文件校验 SHA256。
 - 程序不内置遥测；只有你配置的模型端点、更新检查和远程 MCP 会联网。
-- 发现安全问题请通过仓库 Issues 私下说明，不要公开贴 Key 或会话内容。
+- 发现安全问题请通过 [GitHub Security Advisories](https://github.com/MC5lan/WIN7Harness/security/advisories/new) 私下报告，不要公开贴 Key 或会话内容。
 
 ## 授权
 
