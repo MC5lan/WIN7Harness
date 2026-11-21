@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.20.14"
+  CGO_ENABLED: "0"
+
+jobs:
+  build:
+    name: build (${{ matrix.goarch }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        goarch: [amd64, 386]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: 依赖准入
+        run: go run ./cmd/depguard
+      - name: 编译全部包
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+        run: go build ./...
+      - name: 安装 rsrc（图标资源编译器）
+        # verify_exe.py 要求产物含 .rsrc 图标段；纯 go build 没有，
+        # 因此先用 rsrc 生成 syso（与 build.sh 的交叉编译段一致）。
+        run: go install github.com/akavel/rsrc@v0.10.2
+      - name: 编译产物
+        env:
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p dist
+          "$(go env GOPATH)/bin/rsrc" -arch "${{ matrix.goarch }}" \
+            -ico build/win7harness.ico -o cmd/win7harness/rsrc.syso
+          go build -trimpath -buildvcs=false \
+            -ldflags "-s -w -H=windowsgui" \
+            -o dist/WIN7Harness-${{ matrix.goarch }}.exe ./cmd/win7harness
+          rm -f cmd/win7harness/rsrc.syso
+          ls -lh dist/
+      - name: PE 结构校验
+        run: python3 tools/verify_exe.py dist/WIN7Harness-${{ matrix.goarch }}.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exe-${{ matrix.goarch }}
+          path: dist/*.exe
+
+  vet:
+    name: vet
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: go vet
+        env:
+          GOOS: windows
+        run: go vet -unsafeptr=false ./...
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - name: 单测（Linux 侧只跑可跨平台包）
+        if: runner.os == 'Linux'
+        run: go test ./internal/core/... ./internal/llm/... ./internal/eval/... ./internal/coreutil/... -count=1
+      - name: 单测（Windows 全量）
+        if: runner.os == 'Windows'
+        run: go test ./... -count=1 -timeout 15m
