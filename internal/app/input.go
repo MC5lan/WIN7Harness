@@ -236,8 +236,6 @@ func readableOn(fg, bg uint32, min float64) uint32 {
 func (a *App) paintInputBox(u *UI, x, y, w, H int32) {
 	c := u.c
 	th := a.th
-	inputText := readableOn(th.Text, th.Card, 4.5)
-	inputHint := readableOn(th.TextMute, th.Card, 3.0)
 
 	h := a.inputHeight()
 	r := ui.R(x+16, y+10, w-32, h-20)
@@ -259,7 +257,16 @@ func (a *App) paintInputBox(u *UI, x, y, w, H int32) {
 	u.Hit("input", ui.R(r.X, r.Y, r.W, r.Bottom()-inputActionH))
 
 	textY := r.Y + inputPadTop
+	textY += a.paintInputThumbs(u, r)
+	a.paintInputText(u, r, textY)
+	a.paintInputActions(u, r)
+	a.paintComplete(u, x, y, w)
+}
 
+// paintInputThumbs 绘制待发送图片缩略图，返回文本区需要下移的高度。
+func (a *App) paintInputThumbs(u *UI, r ui.Rect) int32 {
+	c := u.c
+	th := a.th
 	// 附件缩略图（点击移除）
 	a.chipRects = nil
 	if len(a.pendingImgs) > 0 {
@@ -275,9 +282,17 @@ func (a *App) paintInputBox(u *UI, x, y, w, H int32) {
 			c.Round(ui.R(cx-6, cy-6, 12, 12), 6, th.Danger)
 			drawIcon(c, "close", ui.R(cx-3, cy-3, 7, 7), 0xFFFFFF)
 		}
-		textY += ThumbH + 12
+		return ThumbH + 12
 	}
+	return 0
+}
 
+// paintInputText 绘制输入文本、选区、滚动条与插入符。
+func (a *App) paintInputText(u *UI, r ui.Rect, textY int32) {
+	c := u.c
+	th := a.th
+	inputText := readableOn(th.Text, th.Card, 4.5)
+	inputHint := readableOn(th.TextMute, th.Card, 3.0)
 	// 文本区几何
 	lineH := int32(inputLineH)
 	if a.dense() {
@@ -390,7 +405,12 @@ func (a *App) paintInputBox(u *UI, x, y, w, H int32) {
 		}
 		c.VLine(cx, a.curCaretY+2, lineH-5, th.Accent)
 	}
+}
 
+// paintInputActions 绘制输入卡底部操作条。
+func (a *App) paintInputActions(u *UI, r ui.Rect) {
+	c := u.c
+	th := a.th
 	// ---------- 操作条 ----------
 	actionY := r.Bottom() - inputActionH
 
@@ -487,9 +507,6 @@ func (a *App) paintInputBox(u *UI, x, y, w, H int32) {
 			}
 		}
 	}
-
-	// 补全浮层（斜杠/文件引用）
-	a.paintComplete(u, x, y, w)
 }
 
 const inputChipMetaW = 32
