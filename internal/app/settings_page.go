@@ -63,10 +63,16 @@ func (a *App) paintSettings(c *ui.Canvas) {
 	c.TextFace(a.railW+56, 15, "设置", ui.FsLg, 700, th.Text, ui.FaceUI)
 	c.TextFace(a.railW+56+c.MeasureFace("设置", ui.FsLg, 700, ui.FaceUI)+14, 20,
 		"模型、外观、权限、网络与预算集中在这里 · Ctrl+, 打开", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	if label := a.settingsDirtyLabel(); label != "" {
+		c.TextFace(W-318, 20, label, ui.FsXs, 500, th.Warn, ui.FaceUI)
+	}
 	if u.Button("set.save.top", "保存", ui.R(W-206, 14, 84, 30), BtnPrimary) {
 		a.queueUI(a.saveSettings)
 	}
 	if u.Button("set.back", "← 返回对话", ui.R(W-114, 14, 102, 30), BtnGhost) {
+		if note := a.settingsDiscardNote(); note != "" {
+			a.toast(note, true)
+		}
 		a.page = PageChat
 	}
 

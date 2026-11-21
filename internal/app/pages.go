@@ -54,6 +54,7 @@ func (a *App) initForms() {
 	a.ui.SetField("set.sysprompt", a.cfg.SystemPrompt)
 	a.ui.SetField("set.toolprofile", a.cfg.ToolProfile)
 	a.presetIdx = a.cfg.ActiveProvider
+	a.settingsMarkSaved()
 }
 
 func (a *App) applyPreset(i int) {
@@ -688,6 +689,7 @@ func (a *App) saveSettings() {
 	} else {
 		a.toast("设置已保存", false)
 	}
+	a.settingsMarkSaved()
 	a.page = PageChat
 }
 

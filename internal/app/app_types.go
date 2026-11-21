@@ -112,6 +112,9 @@ type App struct {
 
 	settingsScrl float32
 	settingsH    int32
+	// settingsBaseline 是进入设置页时的字段指纹；用于显示“未保存修改”，
+	// 只存哈希，不把 API Key 等原文留在额外字符串里。
+	settingsBaseline uint64
 	// modelsCache 保存从端点 /models 动态拉到的模型 ID，键是规范化 BaseURL。
 	// 只存在内存里：它属于端点元数据，不需要写进配置文件。
 	modelsCache map[string][]string
