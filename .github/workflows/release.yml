@@ -39,11 +39,21 @@ jobs:
           REQUIRE_SIGNED: "1"
           OUT_DIR: dist
         run: ./build.sh
+      - name: 生成更新清单
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+        run: |
+          go run ./tools/make_manifest \
+            -version "${GITHUB_REF_NAME#v}" \
+            -out dist/latest.json \
+            -key-from-env UPDATE_PRIVATE_KEY \
+            -dist dist
       - name: 生成校验和
-        run: cd dist && sha256sum *.exe *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
+        run: cd dist && sha256sum *.exe *.zip latest.json > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/WIN7Harness-v*-win7.zip
+            dist/latest.json
             dist/SHA256SUMS.txt
           generate_release_notes: true
