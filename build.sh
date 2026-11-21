@@ -5,36 +5,58 @@
 # 用法：
 #   ./build.sh              # 全量构建
 #   FORCE_ICON=1 ./build.sh # 强制重绘图标
+#   SKIP_ICON=1 ./build.sh  # 跳过图标生成，复用已有 ico（CI 用）
 #   OUT_DIR=/path ./build.sh # 指定 ZIP 输出目录
+#   GO=/path/to/go1.20.14/bin/go ./build.sh # 指定 Go 工具链（未设置时自动探测）
+#   PY=/path/to/python3 ./build.sh # 指定 Python 3（默认 python3）
 #   UPDATE_PUBKEY=... ./build.sh # 注入更新清单 Ed25519 公钥（正式发布必填）
 #   REQUIRE_SIGNED=1 ./build.sh  # 未注入公钥则拒绝构建（发布流水线用）
 set -euo pipefail
 cd "$(dirname "$0")"
 
-export PATH="/home/marvis/go1.20/go/bin:/home/marvis/go1.20/bin:$PATH"
-GO=${GO:-go}
+# Go 探测顺序：显式 GO 环境变量 > GOROOT/bin > PATH
+if [ -z "${GO:-}" ]; then
+  if [ -n "${GOROOT:-}" ] && [ -x "${GOROOT}/bin/go" ]; then
+    GO="${GOROOT}/bin/go"
+  else
+    GO="$(command -v go || true)"
+  fi
+fi
+if [ -z "$GO" ] || [ ! -x "$GO" ]; then
+  echo "!! 未找到 go，请设置 GO=/path/to/go1.20.14/bin/go 或 GOROOT"; exit 1
+fi
+export GO
 RSRC=${RSRC:-rsrc}
 DIST=dist
 VERSION=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/core/config.go)
 echo "=== WIN7 Harness v${VERSION} ==="
 
 # ---------- 0. 前置检查 ----------
-gov=$($GO version | awk '{print $3}')
+gov=$("$GO" version | awk '{print $3}')
 echo "[0/5] Go: $gov"
 case "$gov" in
   go1.20*) ;;
   *) echo "!! 必须用 Go 1.20.x，否则产物无法在 Win7 启动"; exit 1 ;;
 esac
 
+PY=${PY:-python3}
+if ! command -v "$PY" >/dev/null 2>&1; then
+  echo "!! 未找到 python3，请设置 PY=/path/to/python3"; exit 1
+fi
+echo "[0/5] Python: $($PY --version 2>&1)"
+
 # 依赖准入：新增依赖若要求 Go>1.20 或带强 copyleft 许可证，直接失败
+# 注意：depguard 通过 GO 环境变量定位工具链，这里有意显式传递（不是冗余）。
 echo "      依赖准入审查"
 GO="$GO" "$GO" run ./cmd/depguard || exit 1
 
 # ---------- 1. 品牌图标 ----------
 echo "[1/5] 图标"
-if [ ! -f build/win7harness.ico ] || [ "${FORCE_ICON:-0}" = "1" ]; then
+if [ "${SKIP_ICON:-0}" = "1" ] && [ -f build/win7harness.ico ]; then
+  echo "      跳过图标生成（SKIP_ICON=1），复用已有 ico"
+elif [ ! -f build/win7harness.ico ] || [ "${FORCE_ICON:-0}" = "1" ]; then
   # 纯 Go 生成器：与界面 DrawLogo 同一套珊瑚 >_ 设计，不再依赖 Python/Pillow。
-  $GO run ./tools/gen_icon.go
+  "$GO" run ./tools/gen_icon.go
 else
   echo "      复用 build/win7harness.ico"
 fi
@@ -60,9 +82,9 @@ fi
 for pair in "amd64:WIN7Harness-amd64.exe" "386:WIN7Harness-386.exe"; do
   arch=${pair%%:*}
   out=${pair##*:}
-  $RSRC -arch "$arch" -ico build/win7harness.ico -o cmd/win7harness/rsrc.syso
+  "$RSRC" -arch "$arch" -ico build/win7harness.ico -o cmd/win7harness/rsrc.syso
   CGO_ENABLED=0 GOOS=windows GOARCH="$arch" \
-    $GO build -trimpath -buildvcs=false \
+    "$GO" build -trimpath -buildvcs=false \
     -ldflags "$LDFLAGS" \
     -o "$DIST/$out" ./cmd/win7harness
   echo "      $out  $(stat -c%s "$DIST/$out" | awk '{printf "%.2f MB", $1/1048576}')"
@@ -73,7 +95,7 @@ rm -f cmd/win7harness/rsrc.syso
 # ---------- 3. 产物校验 ----------
 echo "[3/5] 校验 PE 与图标资源"
 for f in "$DIST"/*.exe; do
-  python3 tools/verify_exe.py "$f"
+  "$PY" tools/verify_exe.py "$f"
 done
 
 # ---------- 4. 附带文件 ----------
@@ -82,7 +104,7 @@ cp -f build/win7harness.ico "$DIST/win7harness.ico"
 cp -f build/make-portable.bat "$DIST/make-portable.bat"
 printf '%s\r\n' "$VERSION" > "$DIST/version.txt"
 printf '      version.txt (%s)\r\n' "$VERSION"
-python3 - "$DIST" "$VERSION" <<'PY'
+"$PY" - "$DIST" "$VERSION" <<'PY'
 import sys, os
 dist, ver = sys.argv[1], sys.argv[2]
 raw = open('build/setup.bat', 'rb').read().decode('ascii')
@@ -90,7 +112,7 @@ raw = raw.replace('__VERSION__', ver)
 open(os.path.join(dist, 'setup.bat'), 'wb').write(raw.encode('ascii'))
 print('      setup.bat (%d bytes, CRLF, ASCII)' % os.path.getsize(os.path.join(dist, 'setup.bat')))
 PY
-python3 - "$DIST" <<'PY'
+"$PY" - "$DIST" <<'PY'
 import sys, os
 dist = sys.argv[1]
 src = os.path.join('docs', '使用说明.txt')
@@ -103,7 +125,7 @@ PY
 # ---------- 5. 打包 ----------
 echo "[5/5] 打包"
 OUT_DIR=${OUT_DIR:-$DIST}
-python3 - "$DIST" "$OUT_DIR" "$VERSION" <<'PY'
+"$PY" - "$DIST" "$OUT_DIR" "$VERSION" <<'PY'
 import sys, os, zipfile
 dist, out_dir, ver = sys.argv[1], sys.argv[2], sys.argv[3]
 os.makedirs(out_dir, exist_ok=True)
