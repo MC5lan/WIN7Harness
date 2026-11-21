@@ -81,6 +81,10 @@ func (a *App) restoreHistory() {
 		return
 	}
 	a.eng.Reset()
+	if len(cv.EngineMsgs) > 0 {
+		a.eng.LoadHistory(cv.EngineMsgs)
+		return
+	}
 	for _, m := range cv.Msgs {
 		if m.Role == "user" || (m.Role == "assistant" && m.Text != "") {
 			text := m.Text

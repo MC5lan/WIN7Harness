@@ -5,6 +5,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"sort"
+	"strings"
 	"sync"
 
 	"win7harness/internal/core"
@@ -44,6 +46,13 @@ type Context struct {
 	PreApproved bool
 	// Agents 为工作区自定义子代理定义，task 工具用它解析 agent 参数。
 	Agents []core.AgentDef
+	// SkillLoaded / MarkSkillLoaded 让 skill_use 具备会话级去重：
+	// 同一技能第二次调用只回一句“已加载”，不再把正文重复塞进上下文。
+	SkillLoaded     func(name string) bool
+	MarkSkillLoaded func(name string)
+	// LoadTool 由引擎注入：core profile 下按需把扩展工具加入下一轮工具定义。
+	// 返回 false 表示当前模式/白名单不允许加载。
+	LoadTool func(name string) bool
 }
 
 // Result 工具执行结果。
@@ -52,6 +61,12 @@ type Result struct {
 	// Display 为 true 时以卡片形式重点展示（如 todo 列表、文件预览）。
 	Display bool
 	Title   string
+	// Trust 标记结果来源：system / user / project / model-notes / external。
+	// 空值由工具元数据补齐；外部内容统一作为不可信资料注入。
+	Trust string
+	// Detail 是只给界面看的结构化细节（例如 edit_file/apply_patch 的差异），
+	// 不进入模型上下文，避免为了展示 diff 再重复喂几 KB。
+	Detail string
 }
 
 // Tool 一个工具定义。
@@ -60,44 +75,171 @@ type Tool struct {
 	Desc   string
 	Schema string
 	Run    func(ctx *Context, args map[string]interface{}) (Result, error)
+
+	// 以下字段由 defaultToolMeta 在注册时补齐；动态工具（MCP）单独赋值。
+	Category     string // filesystem / exec / analysis / network / memory / skills / agent ...
+	ReadOnly     bool   // 计划模式是否允许；不代表绝对无副作用
+	ParallelSafe bool   // 是否可与其他只读工具并行
+	Trust        string // system / external ...
+	MaxOutput    int    // 0 = 用全局预算
+	Hidden       bool   // 不进入常规工具清单（保留给内部工具）
+	Core         bool   // core profile 是否保留
 }
 
 var (
 	registry   []Tool
 	registryMu sync.RWMutex
+	// registryRev 在工具新增/替换/卸载时递增，供上层缓存工具定义。
+	registryRev uint64
 )
 
+// 工具元数据：集中一处维护只读/并行/分类，避免 agent/batch.go 与 registry.go
+// 各有一份白名单，改一处漏一处。
+var defaultToolMeta = map[string]Tool{
+	"read_file":      {Category: "filesystem", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"write_file":     {Category: "filesystem", Trust: "system", Core: true},
+	"edit_file":      {Category: "filesystem", Trust: "system", Core: true},
+	"delete_path":    {Category: "filesystem", Trust: "system", Core: true},
+	"apply_patch":    {Category: "filesystem", Trust: "system", Core: true},
+	"list_dir":       {Category: "filesystem", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"glob":           {Category: "filesystem", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"grep":           {Category: "filesystem", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"todo_write":     {Category: "plan", ReadOnly: true, Trust: "system", Core: true},
+	"run_command":    {Category: "exec", Trust: "system", Core: true},
+	"run_tests":      {Category: "exec", Trust: "system", Core: true},
+	"diagnostics":    {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"lsp":            {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"code_search":    {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"calls":          {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"repo_map":       {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project", Core: true},
+	"toolchain":      {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "system"},
+	"datatable":      {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"quality":        {Category: "analysis", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"read_image":     {Category: "multimodal", ReadOnly: true, ParallelSafe: true, Trust: "project"},
+	"read_artifact":  {Category: "filesystem", ReadOnly: true, ParallelSafe: true, Trust: "external", Core: true},
+	"web_fetch":      {Category: "network", ReadOnly: true, ParallelSafe: true, Trust: "external"},
+	"web_search":     {Category: "network", ReadOnly: true, ParallelSafe: true, Trust: "external"},
+	"history_search": {Category: "history", ReadOnly: true, ParallelSafe: true, Trust: "external"},
+	"memory_list":    {Category: "memory", ReadOnly: true, ParallelSafe: true, Trust: "model-notes"},
+	"memory_search":  {Category: "memory", ReadOnly: true, ParallelSafe: true, Trust: "model-notes"},
+	"memory_save":    {Category: "memory", Trust: "model-notes"},
+	"skill_list":     {Category: "skills", ReadOnly: true, ParallelSafe: true, Trust: "user", Core: true},
+	"skill_use":      {Category: "skills", ReadOnly: true, ParallelSafe: true, Trust: "user", Core: true},
+	"tool_search":    {Category: "skills", ReadOnly: true, ParallelSafe: true, Trust: "system", Core: true},
+	"tool_load":      {Category: "skills", ReadOnly: true, Trust: "system", Core: true},
+	"task":           {Category: "agent", ReadOnly: true, Trust: "system", Core: true},
+	"task_list":      {Category: "agent", ReadOnly: true, ParallelSafe: true, Trust: "system"},
+	"task_output":    {Category: "agent", ReadOnly: true, ParallelSafe: true, Trust: "system"},
+	"task_kill":      {Category: "agent", Trust: "system"},
+}
+
+// planSafeTools 是计划模式真正允许的工具集合。它比 ReadOnly 更窄：
+// 网页/搜索/历史检索虽然不改本地状态，但会联网或扩大输入面，计划模式先不放。
+// 这里刻意沿用旧版计划模式白名单，避免“升级后计划模式突然能联网”的隐性行为变化。
+var planSafeTools = map[string]bool{
+	"read_file":     true,
+	"read_artifact": true,
+	"list_dir":      true,
+	"glob":          true,
+	"grep":          true,
+	"repo_map":      true,
+	"diagnostics":   true,
+	"toolchain":     true,
+	"lsp":           true,
+	"code_search":   true,
+	"calls":         true,
+	"skill_list":    true,
+	"skill_use":     true,
+	"tool_search":   true,
+	"tool_load":     true,
+	"todo_write":    true,
+	"memory_list":   true,
+	"memory_search": true,
+	"task":          true,
+}
+
+var builtinNames = func() map[string]bool {
+	m := make(map[string]bool, len(defaultToolMeta))
+	for n := range defaultToolMeta {
+		m[n] = true
+	}
+	return m
+}()
+
 func register(t Tool) {
+	if m, ok := defaultToolMeta[t.Name]; ok {
+		mergeMeta(&t, m)
+	}
 	registryMu.Lock()
 	registry = append(registry, t)
+	registryRev++
 	registryMu.Unlock()
 }
 
-// RegisterDynamic 运行时注册工具（MCP 等扩展使用）；同名工具会被替换。
-// RegisterDynamic 注册运行时工具（MCP 等）。同名直接替换并写日志——
-// 覆盖内建工具危害大（如顶掉 run_command 就相当于把安全确认体系架空），
-// 以前静默替换，现在至少让用户在日志里看到。
-func RegisterDynamic(t Tool) {
+func mergeMeta(t *Tool, m Tool) {
+	if t.Category == "" {
+		t.Category = m.Category
+	}
+	if !t.ReadOnly {
+		t.ReadOnly = m.ReadOnly
+	}
+	if !t.ParallelSafe {
+		t.ParallelSafe = m.ParallelSafe
+	}
+	if t.Trust == "" {
+		t.Trust = m.Trust
+	}
+	if t.MaxOutput == 0 {
+		t.MaxOutput = m.MaxOutput
+	}
+	if !t.Hidden {
+		t.Hidden = m.Hidden
+	}
+	if !t.Core {
+		t.Core = m.Core
+	}
+}
+
+// RegisterDynamic 注册运行时工具（MCP 等）。内建工具不可被覆盖：
+// 顶掉 run_command 等于把安全确认体系架空，必须拒绝而不是只写日志。
+func RegisterDynamic(t Tool) bool {
+	if builtinNames[t.Name] {
+		core.Logf("tools: 拒绝运行时工具 %q 覆盖内建工具", t.Name)
+		return false
+	}
+	if t.Trust == "" {
+		t.Trust = "external"
+	}
+	if t.Category == "" {
+		t.Category = "mcp"
+	}
 	registryMu.Lock()
 	for i := range registry {
 		if registry[i].Name == t.Name {
 			registry[i] = t
+			registryRev++
 			registryMu.Unlock()
-			core.Logf("tools: MCP/运行时工具 %q 覆盖了同名内建工具（内建实现已被替换，如需可信内置实现请重启后通过 /mcp 检查）", t.Name)
-			return
+			core.Logf("tools: 运行时工具 %q 已替换同名动态工具", t.Name)
+			return true
 		}
 	}
 	registry = append(registry, t)
+	registryRev++
 	registryMu.Unlock()
+	return true
 }
 
 // Unregister 移除运行时注册的工具，返回是否移除了内容。
 func Unregister(name string) bool {
+	if builtinNames[name] {
+		return false
+	}
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	for i := range registry {
 		if registry[i].Name == name {
 			registry = append(registry[:i], registry[i+1:]...)
+			registryRev++
 			return true
 		}
 	}
@@ -113,6 +255,20 @@ func All() []Tool {
 	return out
 }
 
+// Count 返回当前工具数量（含动态 MCP）。
+func Count() int {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	return len(registry)
+}
+
+// Revision 返回工具注册表版本，供上层缓存工具定义。
+func Revision() uint64 {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	return registryRev
+}
+
 // Find 按名称查找工具。
 func Find(name string) (Tool, bool) {
 	registryMu.RLock()
@@ -125,11 +281,33 @@ func Find(name string) (Tool, bool) {
 	return Tool{}, false
 }
 
-// Defs 返回适用于 OpenAI function calling 的工具定义。
+// 工具 profile。
+const (
+	ProfileFull   = "full"
+	ProfileCore   = "core"
+	ProfilePlan   = "plan"
+	ProfileSub    = "subagent"
+	ProfileCustom = "custom"
+)
+
+// Defs 返回全部工具定义（兼容旧调用；新代码用 DefsFor 裁剪）。
 func Defs() []llm.ToolDef {
+	return DefsFor(ProfileFull, nil)
+}
+
+// DefsFor 按 profile 与白名单返回工具定义，并按名称稳定排序。
+// allow 为 nil 表示不按名称过滤；空 map 表示一个都不允许（不要传空 map 表示“不过滤”）。
+func DefsFor(profile string, allow map[string]bool) []llm.ToolDef {
 	all := All()
+	sort.SliceStable(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	out := make([]llm.ToolDef, 0, len(all))
 	for _, t := range all {
+		if t.Hidden || !profileAllows(profile, t) {
+			continue
+		}
+		if allow != nil && !allow[t.Name] {
+			continue
+		}
 		out = append(out, llm.ToolDef{
 			Type: "function",
 			Function: llm.ToolFuncDef{
@@ -140,6 +318,19 @@ func Defs() []llm.ToolDef {
 		})
 	}
 	return out
+}
+
+func profileAllows(profile string, t Tool) bool {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case ProfilePlan:
+		return planSafeTools[t.Name]
+	case ProfileCore:
+		return t.Core
+	case ProfileSub:
+		return t.ReadOnly
+	default:
+		return true
+	}
 }
 
 // Get 读取字符串参数。
@@ -180,26 +371,44 @@ func GetBool(args map[string]interface{}, key string, def bool) bool {
 	return def
 }
 
-// readOnlyTools 计划模式下允许执行的白名单：只读与待办记录，不触碰磁盘状态。
-var readOnlyTools = map[string]bool{
-	"read_file":     true,
-	"list_dir":      true,
-	"glob":          true,
-	"grep":          true,
-	"repo_map":      true,
-	"diagnostics":   true,
-	"toolchain":     true,
-	"lsp":           true,
-	"code_search":   true,
-	"calls":         true,
-	"skill_list":    true,
-	"skill_use":     true,
-	"todo_write":    true,
-	"memory_list":   true,
-	"memory_search": true,
-	// 子 Agent 会继承计划模式，因此允许在只读调研时派发任务
-	"task": true,
+// IsReadOnly 判断工具是否为只读（不会改变工作区状态）。
+func IsReadOnly(name string) bool {
+	if t, ok := Find(name); ok {
+		return t.ReadOnly
+	}
+	return false
 }
 
-// IsReadOnly 判断工具是否为只读（不会改变工作区状态）。
-func IsReadOnly(name string) bool { return readOnlyTools[name] }
+// IsPlanSafe 判断计划模式是否允许该工具（比只读更窄，不含联网/外部检索）。
+func IsPlanSafe(name string) bool { return planSafeTools[name] }
+
+// IsParallelSafe 判断工具能否与其它只读工具并行。
+func IsParallelSafe(name string) bool {
+	if t, ok := Find(name); ok {
+		return t.ParallelSafe
+	}
+	return false
+}
+
+// IsBuiltin 判断是否为内建工具名。
+func IsBuiltin(name string) bool { return builtinNames[name] }
+
+// TrustOf 返回工具结果的默认信任级别。
+func TrustOf(name string) string {
+	if t, ok := Find(name); ok && t.Trust != "" {
+		return t.Trust
+	}
+	return "external"
+}
+
+// CoreTools 返回 core profile 的工具名，供文档/自检使用。
+func CoreTools() []string {
+	var out []string
+	for n, m := range defaultToolMeta {
+		if m.Core {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}

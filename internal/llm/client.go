@@ -39,6 +39,9 @@ type Message struct {
 	Parts []Part `json:"-"`
 	// 仅本地 UI 使用，不序列化
 	Hidden bool `json:"-"`
+	// Cache 表示把这条 system 消息按 Anthropic 风格 content block 发送，
+	// 并附带 cache_control: ephemeral。仅对支持的网关启用；普通消息保持字符串。
+	Cache bool `json:"-"`
 }
 
 // ToolCall 模型发起的工具调用。
@@ -90,7 +93,10 @@ type Client struct {
 	// SessionID 是 OpenCode Go 要求的稳定会话标识（x-opencode-session）。
 	// 每个会话一个，用于上游路由与提示缓存；其他端点忽略此字段。
 	SessionID string
-	Timeout   time.Duration
+	// PromptCache 控制是否给 system 消息附加 Anthropic 风格 cache_control：
+	// off / auto / anthropic。auto 只在已知支持的网关上启用，避免普通端点 400。
+	PromptCache string
+	Timeout     time.Duration
 
 	// RetryBase 是重试退避的基础间隔（0 用默认 1s），MaxRetries 是重试次数
 	// （0 用默认 3，负数表示关闭重试）。测试里调小以加快速度。
@@ -346,6 +352,36 @@ func newSessionID() string {
 		return "win7h-" + hex.EncodeToString(b[:])
 	}
 	return fmt.Sprintf("win7h-%d", time.Now().UnixNano())
+}
+
+// shouldCacheSystem 判断本次请求是否启用 Anthropic 风格 cache_control。
+// auto 只对已知会解析该字段的网关/模型启用；不认识的一律保持纯字符串，
+// 避免把合法请求变成 400。
+func (c *Client) shouldCacheSystem() bool {
+	switch strings.ToLower(strings.TrimSpace(c.PromptCache)) {
+	case "1", "on", "true", "anthropic":
+		return true
+	case "off", "0", "false":
+		return false
+	}
+	base := strings.ToLower(c.BaseURL)
+	model := strings.ToLower(c.Model)
+	if strings.Contains(base, "openrouter.ai") {
+		return strings.Contains(model, "anthropic/") || strings.Contains(model, "claude")
+	}
+	if strings.Contains(base, "anthropic") {
+		return true
+	}
+	return false
+}
+
+// markPromptCache 只给 system 消息打缓存标记；system 在消息列表最前面，
+// 缓存它等价于缓存稳定前缀（历史与工具结果仍按普通消息发送）。
+func (c *Client) markPromptCache(msgs []Message) {
+	if !c.shouldCacheSystem() || len(msgs) == 0 || msgs[0].Role != "system" {
+		return
+	}
+	msgs[0].Cache = true
 }
 
 // setHeaders 统一请求头。OpenCode Go 要求稳定会话 ID；

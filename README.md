@@ -21,7 +21,7 @@
 > **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
 > 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 >
-> **关于本仓库**：本仓库是 v1.38.1 的快照发布，早期迭代历史未提交到 git；
+> **关于本仓库**：本仓库是 v1.39.0 的快照发布，早期迭代历史未提交到 git；
 > 各版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 `docs/`。
 
 > 上文的“零运行时依赖”指静态链接的单文件 exe。构建期依赖 Go 1.20.14 工具链与
@@ -75,7 +75,7 @@ Windows 7 仍是很多老机器、内网机器和离线环境的唯一选择，�
 | 类别 | 能力 |
 | :--- | :--- |
 | 🤖 **模型接入** | OpenAI Chat Completions 兼容端点：OpenCode Go / Go Plus、DeepSeek、Moonshot、GLM、通义、SiliconFlow、Ollama、LM Studio、vLLM、llama.cpp server 等。 |
-| 🛠️ **编程智能体** | 读 / 写 / 改文件、代码搜索、符号索引、命令执行、测试、Git 提交 / 回滚、补丁逐段审阅、项目长期记忆、技能（Skills）、MCP、子代理、并发任务。 |
+| 🛠️ **编程智能体** | 读 / 写 / 改文件、代码搜索、符号索引、命令执行、测试、Git 提交 / 回滚、补丁逐段审阅、项目长期记忆、内置技能包（9 个随 exe 分发）、MCP、子代理、并发任务。 |
 | 🎨 **原生界面** | Win32 GDI / Canvas 自绘、聊天虚拟化、会话懒加载、高 DPI、主题、命令面板、快捷键、IME 输入。 |
 | 💾 **安装方式** | 标准安装（当前用户 / 所有用户）或便携安装（U 盘 / 移动硬盘）。 |
 | 🔑 **U 盘模式** | 配置、会话跟着 U 盘走；API Key 用 U 盘密码加密，换电脑输入密码即可。 |
@@ -121,7 +121,7 @@ flowchart LR
 - 源码：在 Releases 页面的 “Source code” 区域下载，或直接 `git clone`
 - [`release/`](release/) 目录不再提交构建产物
 
-解压后双击 `WIN7Harness-v1.38.1-Setup.exe`：
+解压后双击 `WIN7Harness-v1.39.0-Setup.exe`：
 
 1. 选择安装范围：仅当前用户（免管理员）或所有用户（Program Files + UAC）
 2. 选择安装方式：标准安装 / 便携安装（U 盘）
@@ -180,7 +180,9 @@ Linux 交叉编译 exe：
 4. 点“测试连接”或输入 `/doctor`。测试会发一条极短对话，验证 Key、模型和工具调用。
 5. 在输入框描述任务，例如：`看一下 D:\proj 里有哪些 Go 文件，帮我加个 Makefile。`
 
-常用命令：`/help`、`/doctor`、`/status`、`/compact`、`/model`、`/dir`、`/update`、`/selftest`、`/crash`、`/export`。
+常用命令：`/help`、`/doctor`、`/status`、`/context`、`/compact`、`/model`、`/dir`、`/update`、`/selftest`、`/crash`、`/export`。
+
+内置技能随 exe 分发，不联网也能用：`repo-onboarding`（陌生仓库上手）、`go-fix-loop`（Go 修复闭环）、`bug-repro`（先复现再修）、`safe-refactor`（安全重构）、`review-diff`（代码评审）、`win7-compat`（Win7 兼容性）、`release-check`（发布检查）、`incident-triage`（崩溃/卡死排查）、`context-recovery`（长任务恢复）。在“扩展 → 技能”里可预览、复制到项目或禁用；项目/全局同名技能优先于内置。
 
 ## U 盘模式与密码
 
@@ -221,7 +223,7 @@ powershell -ExecutionPolicy Bypass -File scripts\installer_regression.ps1
 dist/
   WIN7Harness-amd64.exe
   WIN7Harness-386.exe
-  Win7Harness-v1.38.1-Setup.exe
+  Win7Harness-v1.39.0-Setup.exe
   README.txt
   version.txt
   ...
@@ -254,7 +256,7 @@ scripts/              安装器回归、UI 回归、生命周期检查
 | [企业网络 / PAC / WPAD / CA](docs/win7-enterprise-network-v1.36.md) | 企业内网与证书配置 |
 | [Canvas 渲染与故障排查](docs/canvas-render.md) | 自绘渲染与常见问题 |
 | [Win32 API 注意事项](docs/win32-api-notes.md) | Win7 上的 API 使用边界 |
-| [更新日志](CHANGELOG.md) | v1.7.0 → v1.38.1 的版本演进 |
+| [更新日志](CHANGELOG.md) | v1.7.0 → v1.39.0 的版本演进 |
 | [贡献指南](CONTRIBUTING.md) | 红线、构建、验证与 PR 规范 |
 | [依赖审计](docs/deps-audit.md) | 直接/间接依赖、许可证与裁剪结论 |
 | [发布流程](docs/release-process.md) | 改版本、打 tag、签名与验证 `/update` |

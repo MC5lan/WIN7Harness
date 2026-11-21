@@ -697,6 +697,53 @@ func (a *App) paintInspector(u *UI, x, w, H, topH int32) {
 	}
 	c.HLine(x+16, yy-10, w-32, th.BorderSoft)
 
+	// 上下文预算：把“模型还能装多少”常驻在侧栏；详情交给 /context。
+	if a.eng != nil {
+		msgs, _, histTok, window, limit := a.eng.ContextInfo()
+		toolN, _ := a.eng.ToolDefsStats()
+		c.TextFace(x+16, yy, "上下文", ui.FsSm, 700, th.TextDim, ui.FaceUI)
+		yy += 20
+		barW := w - 32
+		if barW > 8 {
+			used := histTok
+			if used > limit {
+				used = limit
+			}
+			c.Round(ui.R(x+16, yy, barW, 6), 3, ui.Blend(th.Surface, th.Border, 0.6))
+			if used > 0 {
+				den := limit
+				if den < 1 {
+					den = 1
+				}
+				fw := int32(float32(barW) * float32(used) / float32(den))
+				if fw < 2 {
+					fw = 2
+				}
+				col := th.Accent
+				if used*10 >= limit*8 {
+					col = th.Warn
+				}
+				c.Round(ui.R(x+16, yy, fw, 6), 3, col)
+			}
+			yy += 14
+		}
+		c.TextFace(x+16, yy, ellipsis(c,
+			fmt.Sprintf("历史 %d 条 · 约 %s / %s token · 工具 %d 个", msgs, humanTokens(histTok), humanTokens(limit), toolN),
+			ui.FsXs, 400, barW), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		yy += 18
+		c.TextFace(x+16, yy, ellipsis(c,
+			fmt.Sprintf("窗口 %s · 压缩 %d 次 · /context 看分段", humanTokens(window), a.eng.CompactCount()),
+			ui.FsXs, 400, barW), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		yy += 18
+		if sk := a.eng.ActiveSkill(); sk != "" {
+			c.TextFace(x+16, yy, "技能 "+ellipsis(c, sk, ui.FsXs, 400, barW-40), ui.FsXs, 400, th.Accent, ui.FaceUI)
+			yy += 18
+		}
+		yy += 4
+		c.HLine(x+16, yy-8, w-32, th.BorderSoft)
+	}
+	yy = a.paintTimeline(u, x, w, H, yy)
+
 	// 耗时归因：把 /stats 的核心结论常驻在侧栏，不用每次手打命令。
 	if a.eng != nil {
 		if modelMs, toolMs := a.eng.ModelToolMs(); modelMs+toolMs > 0 {

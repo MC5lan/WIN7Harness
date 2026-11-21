@@ -54,6 +54,7 @@ func NewClientFor(cfg *core.Config, p core.Provider, model string) (client *llm.
 		warn = appendWarn(warn, "已跳过 TLS 证书校验：API Key 可能被链路上的中间人窃取（TLSInsecure=true）")
 		core.Logf("bootstrap: TLSInsecure=true —— 到 %s 的流量不校验证书", p.BaseURL)
 	}
+	c.PromptCache = cfg.PromptCache
 	applyProxy(c, cfg)
 	return c, used, warn
 }
@@ -84,6 +85,7 @@ func NewClient(cfg *core.Config) (client *llm.Client, model, warn string) {
 		warn = appendWarn(warn, "已跳过 TLS 证书校验：API Key 可能被链路上的中间人窃取（TLSInsecure=true）")
 		core.Logf("bootstrap: TLSInsecure=true —— 到 %s 的流量不校验证书", p.BaseURL)
 	}
+	c.PromptCache = cfg.PromptCache
 	applyProxy(c, cfg)
 	return c, model, warn
 }
@@ -148,6 +150,7 @@ func NewEngineFor(cfg *core.Config, p core.Provider, model, workDir string, opt 
 	// 0 = 不限制轮数（默认）；>0 时撞顶会暂停询问而不是直接失败。
 	e.MaxToolRounds = cfg.MaxToolRounds
 	e.ContextWindow = cfg.ContextWindow
+	e.ToolProfile = cfg.ToolProfile
 	e.SubAgentTimeoutSec = cfg.SubAgentTimeoutSec
 	e.PlanMode = opt.PlanMode
 	// 审批策略：模式 + 规则 + 目录白名单都来自配置，界面改配置即刻生效。

@@ -42,9 +42,36 @@ func (a *App) slashTools(rest string) bool {
 		if a.cfg.NoFoldTools {
 			state = "关闭（每条工具单独一行）"
 		}
+		profile := a.cfg.ToolProfile
+		if profile == "" {
+			profile = "auto"
+		}
 		a.sysNote("**工具卡折叠** 当前：" + state +
-			"\n\n`/tools fold` 开启 · `/tools off` 关闭 · 快捷键 Ctrl+Shift+T\n" +
+			"\n\n**工具定义 profile** 当前：" + profile +
+			"\n`/tools profile auto|core|full` 切换；auto 在窗口 <64k 时用 core，节省上下文。\n" +
+			"`/tools fold` 开启折叠 · `/tools off` 关闭折叠 · 快捷键 Ctrl+Shift+T\n" +
 			"折叠只影响显示，工具输出仍在上下文里，模型照常能看到。")
+	case "profile", "auto", "core", "full":
+		want := arg
+		if want == "profile" {
+			a.sysNote("用法：`/tools profile auto|core|full`")
+			return true
+		}
+		if a.streaming {
+			a.toast("生成中不能切换工具 profile，先停止", true)
+			return true
+		}
+		a.cfg.ToolProfile = want
+		if err := a.cfg.Save(); err != nil {
+			a.toast("保存失败："+err.Error(), true)
+			return true
+		}
+		if cv := a.currentConv(); cv != nil {
+			a.syncEngineTranscript(cv)
+		}
+		a.rebuildEngine()
+		a.restoreHistory()
+		a.sysNote("工具 profile 已切换为 " + want + "，下一轮生效。")
 	case "fold", "on", "开", "开启":
 		a.cfg.NoFoldTools = false
 		a.foldOpen = nil
@@ -58,7 +85,7 @@ func (a *App) slashTools(rest string) bool {
 		a.layout()
 		a.sysNote("工具卡已改为逐条显示。")
 	default:
-		a.toast("用法：/tools [fold|off]", true)
+		a.toast("用法：/tools [fold|off] 或 /tools profile auto|core|full", true)
 	}
 	return true
 }

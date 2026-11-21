@@ -3,11 +3,13 @@ package app
 import (
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"time"
 
 	"win7harness/internal/core"
 	"win7harness/internal/mcp"
+	"win7harness/internal/skills"
 	"win7harness/internal/ui"
 	"win7harness/internal/ui/kit"
 	"win7harness/internal/win32"
@@ -416,19 +418,48 @@ func (a *App) extSkillsBody(ktx *kit.Ctx, areaW int32) kit.Element {
 	for _, sk := range list {
 		sk := sk
 		scope := "项目"
-		if sk.Scope == "global" {
+		switch sk.Scope {
+		case "global":
 			scope = "全局"
+		case "builtin":
+			scope = "内置"
 		}
 		sub := scope + " · " + sk.Desc
 		if sk.When != "" {
 			sub += " · 用于：" + sk.When
 		}
-		rows = append(rows, extListRow(ktx, textW, sk.Name, sub, tk.TextTertiary,
-			kit.Button("ext.s.see:"+sk.Name, "打开文件", kit.ButtonSecondary, func() {
-				if !win32.ShellOpen(sk.Path) {
-					a.toast("打不开："+sk.Path, true)
+		action := kit.Button("ext.s.see:"+sk.Name, "打开文件", kit.ButtonSecondary, func() {
+			if !win32.ShellOpen(sk.Path) {
+				a.toast("打不开："+sk.Path, true)
+			}
+		})
+		if sk.Scope == "builtin" {
+			action = kit.Button("ext.s.copy:"+sk.Name, "复制到项目", kit.ButtonSecondary, func() {
+				full, ok := skills.Find(a.convWorkDir(), sk.Name)
+				if !ok || full.Body == "" {
+					a.toast("读取内置技能失败", true)
+					return
 				}
-			})))
+				dst := filepath.Join(skills.ProjectDir(a.convWorkDir()), sk.Name, "SKILL.md")
+				if _, err := os.Stat(dst); err == nil {
+					a.toast("项目里已有同名技能，未覆盖："+dst, true)
+					return
+				}
+				if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+					a.toast("创建目录失败："+err.Error(), true)
+					return
+				}
+				doc := fmt.Sprintf("---\nname: %s\ndescription: %s\nwhen: %s\ncategory: %s\ntags: %s\nversion: %s\n---\n\n%s\n",
+					full.Name, full.Desc, full.When, full.Category, full.Tags, full.Version, full.Body)
+				if err := core.WriteFileAtomic(dst, []byte(doc), 0o644); err != nil {
+					a.toast("复制失败："+err.Error(), true)
+					return
+				}
+				a.uiDataDrop()
+				a.toast("已复制到项目技能："+dst, false)
+			})
+		}
+		rows = append(rows, extListRow(ktx, textW, sk.Name, sub, tk.TextTertiary, action))
 	}
 	return kit.Scroll("ext:skills", 0, kit.Column(6, rows...))
 }

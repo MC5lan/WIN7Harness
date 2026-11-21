@@ -296,11 +296,12 @@ func buildPatchWrites(ctx *Context, patches []filePatch) ([]string, []patchWrite
 func commitPatchWrites(ctx *Context, dry bool, catalog hunkCatalogT, previews []string, writes []patchWrite, changed int, uiConfirmed bool) (Result, error) {
 	summary := strings.Join(previews, "\n")
 	head := catalog.text()
+	detail := clipForTool(summary, 12000)
 	if dry {
-		return Result{Output: fmt.Sprintf("补丁校验通过（dry_run，未写盘）：%d 个文件待改动\n\n段落清单：\n%s\n\n%s", changed, head, summary)}, nil
+		return Result{Output: fmt.Sprintf("补丁校验通过（dry_run，未写盘）：%d 个文件待改动\n\n段落清单：\n%s\n\n%s", changed, head, summary), Detail: detail}, nil
 	}
 	if changed == 0 {
-		return Result{Output: "补丁校验通过，但没有产生任何实际改动\n\n段落清单：\n" + head + "\n\n" + summary}, nil
+		return Result{Output: "补丁校验通过，但没有产生任何实际改动\n\n段落清单：\n" + head + "\n\n" + summary, Detail: detail}, nil
 	}
 
 	// 先全部编码成功，再开始确认/写盘：避免写到第 3 个文件时才发现
@@ -366,6 +367,7 @@ func commitPatchWrites(ctx *Context, dry bool, catalog hunkCatalogT, previews []
 	return Result{
 		Output: fmt.Sprintf("补丁已应用，共写入 %d 个文件：\n- %s\n\n%s",
 			len(done), strings.Join(done, "\n- "), summary),
+		Detail: clipForTool(summary, 12000),
 	}, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"win7harness/internal/agent"
 	"win7harness/internal/codeidx"
@@ -143,6 +144,131 @@ func (a *App) slashMCP(rest string) bool {
 	return true
 }
 
+// slashContext 展示本轮系统提示的分段、工具定义与历史占用，回答“模型看到了什么”。
+func (a *App) slashContext(rest string) bool {
+	if a.eng == nil {
+		return true
+	}
+	if arg := strings.TrimSpace(rest); arg != "" {
+		lower := strings.ToLower(arg)
+		if strings.HasPrefix(lower, "cache") {
+			val := strings.ToLower(strings.TrimSpace(arg[len("cache"):]))
+			switch val {
+			case "auto", "off", "anthropic":
+			default:
+				a.toast("用法：/context cache auto|off|anthropic", true)
+				return true
+			}
+			if a.streaming {
+				a.toast("生成中不能改缓存策略，先停止", true)
+				return true
+			}
+			a.cfg.PromptCache = val
+			if err := a.cfg.Save(); err != nil {
+				a.toast("保存失败："+err.Error(), true)
+				return true
+			}
+			if cv := a.currentConv(); cv != nil {
+				a.syncEngineTranscript(cv)
+			}
+			a.rebuildEngine()
+			a.restoreHistory()
+			a.sysNote("提示缓存策略已设为 " + val + "。auto 只对已知支持 cache_control 的网关启用；anthropic 强制启用，off 关闭。")
+			return true
+		}
+		if !strings.HasPrefix(lower, "window") {
+			a.sysNote("用法：`/context` 查看分段；`/context window 32k` 设置上下文窗口；`/context cache auto|off|anthropic` 设置缓存策略")
+			return true
+		}
+		val := strings.TrimSpace(arg[len("window"):])
+		n, ok := parseWindowSize(val)
+		if !ok {
+			a.toast("窗口值不合法："+val, true)
+			return true
+		}
+		if a.streaming {
+			a.toast("生成中不能改上下文窗口，先停止", true)
+			return true
+		}
+		a.cfg.ContextWindow = n
+		if err := a.cfg.Save(); err != nil {
+			a.toast("保存失败："+err.Error(), true)
+			return true
+		}
+		if cv := a.currentConv(); cv != nil {
+			a.syncEngineTranscript(cv)
+		}
+		a.rebuildEngine()
+		a.restoreHistory()
+		if n == 0 {
+			a.sysNote("上下文窗口已设为 auto（按 128k 估算，实际以端点为准）。")
+		} else {
+			a.sysNote(fmt.Sprintf("上下文窗口已设为 %s token，压缩阈值随之下调/上调。", humanTokens(n)))
+		}
+		return true
+	}
+	msgs, chars, histTok, window, limit := a.eng.ContextInfo()
+	toolN, toolChars := a.eng.ToolDefsStats()
+	var b strings.Builder
+	b.WriteString("**上下文预算**（估算，实际以服务端 usage 为准）\n")
+	fmt.Fprintf(&b, "- 模型窗口 %s token · 自动压缩阈值 %s · 当前历史 %d 条 / %s 字符 / 约 %s token\n",
+		humanTokens(window), humanTokens(limit), msgs, core.HumanSize(int64(chars)), humanTokens(histTok))
+	fmt.Fprintf(&b, "- 工具定义 %d 个 / %s 字符（profile=%s，计划模式=%v）\n",
+		toolN, core.HumanSize(int64(toolChars)), a.eng.EffectiveToolProfile(), a.eng.PlanMode)
+	if a.cfg != nil {
+		fmt.Fprintf(&b, "- 提示缓存策略：%s（auto 只对已知支持 cache_control 的网关启用）\n", a.cfg.PromptCache)
+	}
+	if name := a.eng.ActiveSkill(); name != "" {
+		fmt.Fprintf(&b, "- 已激活技能：%s（/skill off 取消）\n", name)
+	}
+	prefixNow, totalNow := a.eng.PromptPrefixStats()
+	if totalNow > 0 {
+		fmt.Fprintf(&b, "- 与上一轮相比稳定前缀：%d / %d 字符（%.0f%%）\n", prefixNow, totalNow, float64(prefixNow)*100/float64(totalNow))
+	}
+	fmt.Fprintf(&b, "- 本会话自动压缩 %d 次\n", a.eng.CompactCount())
+	b.WriteString("\n**系统提示分段**\n")
+	fmt.Fprintf(&b, "| 段 | 字符 | 约 token | 信任 | 稳定 | 截断 |\n|---|---:|---:|---|---|---|\n")
+	for _, s := range a.eng.PromptStats() {
+		stable := "否"
+		if s.Stable {
+			stable = "是"
+		}
+		trunc := ""
+		if s.Truncated {
+			trunc = "是"
+		}
+		fmt.Fprintf(&b, "| %s | %d | %s | %s | %s | %s |\n",
+			s.Title, s.Bytes, humanTokens(s.Tokens), s.Trust, stable, trunc)
+	}
+	total := a.eng.PromptTotal()
+	fmt.Fprintf(&b, "\n系统提示合计 %d 字符；工具定义 %s 字符（约 %s token）。其余预算留给历史消息与模型输出。\n",
+		total, core.HumanSize(int64(toolChars)), humanTokens(toolChars/3))
+	b.WriteString("\n诊断建议：缓存命中低时先确认 S0-S6（核心/运行环境/用户指令/项目约定/技能/记忆/稳定环境）是否稳定；用 `/context` 对比两次输出即可看出哪段在变。")
+	a.sysNote(b.String())
+	return true
+}
+
+// parseWindowSize 解析 32k / 128000 / 1m / auto。
+func parseWindowSize(s string) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "auto", "0", "默认", "":
+		return 0, true
+	}
+	mult := 1
+	switch {
+	case strings.HasSuffix(s, "k"):
+		mult, s = 1000, strings.TrimSuffix(s, "k")
+	case strings.HasSuffix(s, "m"):
+		mult, s = 1000000, strings.TrimSuffix(s, "m")
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 0 || n > 10_000_000 {
+		return 0, false
+	}
+	return n * mult, true
+}
+
 // slashDoctor 处理 /doctor 及别名。
 func (a *App) slashDoctor(rest string) bool {
 	a.cmdDoctor()
@@ -215,7 +341,9 @@ func (a *App) slashStatus(rest string) bool {
 	sb.WriteString("**运行状态**\n")
 	fmt.Fprintf(&sb, "- 模型 `%s`\n", model)
 	fmt.Fprintf(&sb, "- 工作目录 `%s`\n", a.eng.WorkDir)
-	fmt.Fprintf(&sb, "- 上下文 %d 条消息 · 约 %d 字符（超 90000 自动压缩）\n", n, chars)
+	_, _, _, window, limit := a.eng.ContextInfo()
+	fmt.Fprintf(&sb, "- 上下文 %d 条消息 · 约 %d 字符（窗口 %s token，约 %s 自动压缩）\n",
+		n, chars, humanTokens(window), humanTokens(limit))
 	fmt.Fprintf(&sb, "- 用量 %s\n", usageInfo)
 	fmt.Fprintf(&sb, "- 预算 %s\n", a.eng.BudgetLine())
 	fmt.Fprintf(&sb, "- 可回滚 %d 步\n", core.SnapshotCount())

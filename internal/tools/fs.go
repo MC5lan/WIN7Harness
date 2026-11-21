@@ -263,6 +263,7 @@ func runWriteFile(ctx *Context, args map[string]interface{}) (Result, error) {
 		return Result{}, err
 	}
 	existed := false
+	oldText := ""
 	meta := defaultTextMeta(p)
 	if st, err := os.Stat(p); err == nil {
 		existed = true
@@ -280,8 +281,9 @@ func runWriteFile(ctx *Context, args map[string]interface{}) (Result, error) {
 			}
 		}
 		if oldData, rerr := os.ReadFile(p); rerr == nil {
-			oldText, oldMeta, derr := decodeTextBytes(oldData)
+			decoded, oldMeta, derr := decodeTextBytes(oldData)
 			if derr == nil {
+				oldText = decoded
 				// 已有文件保留原编码/EOL；覆盖写入不能把 GBK 老项目悄悄改成 UTF-8。
 				meta = oldMeta
 				if !confirmDiff(ctx, p, normalizeForMatch(oldText), normalizeForMatch(content), "覆盖写入") {
@@ -320,8 +322,13 @@ func runWriteFile(ctx *Context, args map[string]interface{}) (Result, error) {
 		verb = "更新"
 	}
 	lines := strings.Count(normalizeForMatch(content), "\n") + 1
+	detail := ""
+	if existed && strings.TrimSpace(oldText) != "" {
+		detail = clipForTool(core.UnifiedDiff(normalizeForMatch(oldText), normalizeForMatch(content), p, 2), 12000)
+	}
 	return Result{
 		Output: fmt.Sprintf("已%s %s（%d 字节，%d 行，%s）", verb, p, len(data), lines, meta.label()),
+		Detail: detail,
 	}, nil
 }
 
@@ -379,7 +386,10 @@ func runEditFile(ctx *Context, args map[string]interface{}) (Result, error) {
 		core.DiscardLastSnapshot()
 		return Result{}, fmt.Errorf("写入失败（原文件未改动）：%v", err)
 	}
-	return Result{Output: fmt.Sprintf("已修改 %s（%d 字节 → %d 字节，保留 %s）", p, len(text), len(updated), meta.label())}, nil
+	return Result{
+		Output: fmt.Sprintf("已修改 %s（%d 字节 → %d 字节，保留 %s）", p, len(text), len(updated), meta.label()),
+		Detail: clipForTool(core.UnifiedDiff(normText, updated, p, 2), 12000),
+	}, nil
 }
 
 func runListDir(ctx *Context, args map[string]interface{}) (Result, error) {

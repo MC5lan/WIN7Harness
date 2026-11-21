@@ -649,6 +649,38 @@ func (a *App) settingsAdvancedTab(p *settingsPane) {
 	th := a.th
 	iw := p.cw - 18 - 44
 
+	// 注入与上下文：全局指令、工具定义数量。长指令仍推荐 /instructions，
+	// 这里给一个不打开配置文件也能改的入口。
+	rCtx := p.card("注入与上下文", 190)
+	ixc := rCtx.X + 22
+	iyc := rCtx.Y + 48
+	c.TextFace(ixc, iyc, "用户全局指令（单行；长内容用 /instructions）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	u.TextField("set.sysprompt", ui.R(ixc, iyc+18, iw, 32), "", "例如：回答用中文，先给结论，不要寒暄")
+	c.TextFace(ixc, iyc+58, "工具定义 profile", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	profile := strings.TrimSpace(a.ui.Field("set.toolprofile", "").String())
+	if profile == "" {
+		profile = a.cfg.ToolProfile
+	}
+	if profile == "" {
+		profile = "auto"
+	}
+	if u.Button("set.toolprofile", "当前："+profile+"（点击切换）", ui.R(ixc, iyc+78, 220, 30), BtnGhost) {
+		next := "auto"
+		switch strings.ToLower(profile) {
+		case "auto":
+			next = "core"
+		case "core":
+			next = "full"
+		}
+		a.ui.SetField("set.toolprofile", next)
+		a.Redraw()
+	}
+	c.TextFace(ixc+232, iyc+80, "auto 在窗口 <64k 或 MCP 工具很多时用 core；full 保留全部工具。",
+		ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	iyc += 122
+	c.TextFace(ixc, iyc, fmt.Sprintf("已禁用技能：%d 个（用 /skills off|on 管理）", len(a.cfg.DisabledSkills)),
+		ui.FsXs, 400, th.TextMute, ui.FaceUI)
+
 	hks := a.cfg.Hooks
 	hooksH := int32(150) + int32(len(hks))*34
 	if len(hks) == 0 {

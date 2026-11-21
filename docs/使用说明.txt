@@ -1,4 +1,4 @@
-WIN7 Harness v1.38.1 —— 使用说明
+WIN7 Harness v1.39.0 —— 使用说明
 ================================================================
 
 一个能在 Windows 7 SP1 上跑起来的本地 AI 编程智能体。
@@ -8,7 +8,7 @@ WIN7 Harness v1.38.1 —— 使用说明
 一、安装与升级
 ----------------------------------------------------------------
 推荐用安装包：
-  WIN7Harness-v1.38.1-Setup.exe
+  WIN7Harness-v1.39.0-Setup.exe
 
 双击后按向导走：
 
@@ -294,6 +294,10 @@ AGENTS.md > HARNESS.md > CLAUDE.md > .harness.md，越近的目录优先级越�
                先预检（非仓库 / 合并中途 / 有冲突一律拦下），未填信息按改动自动生成
     /gitstatus 查看仓库状态：当前分支、未提交改动、最近提交
     /status    查看本会话模型、工作目录、上下文占用、token 用量与费用估算
+    /context   查看系统提示分段、工具定义、缓存稳定前缀与上下文预算，
+               用于排查“模型到底看到了什么 / 为什么缓存命中低”；
+               /context window 32k 可设置上下文窗口（auto/8k/16k/32k/64k/128k/200k/1m）；
+               /context cache auto|off|anthropic 设置提示缓存策略（auto 只对已知网关启用）
     /model     查看 / 切换本会话模型：不带参数列出可选模型，
                /model 2 或 /model qwen3-coder 直接切；/model default 回到默认
     /dir       查看 / 切换本会话工作目录：不带参数列出最近目录与默认目录，
@@ -302,8 +306,12 @@ AGENTS.md > HARNESS.md > CLAUDE.md > .harness.md，越近的目录优先级越�
     /budget    查看预算护栏；/budget cost 5 设花费上限，/budget tokens 200000
                设 token 上限，/budget off 关闭
     /hooks     查看已配置的工具钩子
-    /skills    列出可用技能（项目级 .harness\skills 与全局 skills 目录）
-    /skill 名称  加载指定技能的正文，之后按它的流程干活
+    /skills    列出可用技能（内置 / 项目级 .harness\skills / 全局 skills 目录）
+    /skills off 名称  禁用技能（含内置），/skills on 名称 恢复
+    /skill 名称  激活指定技能，下一轮把正文注入上下文；/skill off 取消
+    /instructions [内容]  设置用户全局指令（注入系统提示的用户段）；
+               /instructions clear 清除。它优先于项目约定，但不能覆盖安全边界
+    /tools profile auto|core|full  切换工具定义数量：auto 在窗口 <64k 时用 core
     /index     重建代码索引并显示统计；/index inc 只增量刷新改动过的文件
     /eval      跑一遍评测基线（不调用模型），给出通过率与报告路径
     /memory    查看当前内存档位；/memory on 低内存模式（256MB 友好），
@@ -327,6 +335,8 @@ AGENTS.md > HARNESS.md > CLAUDE.md > .harness.md，越近的目录优先级越�
                还是它答的，可加 /recall 词 7 只看最近 7 天
     /tools     工具卡折叠：/tools fold 把连续 3 条以上已结束的工具卡收成一行，
                /tools off 恢复逐条显示；快捷键 Ctrl+Shift+T 一键切换
+               /tools profile auto|core|full 切换发给模型的工具定义数量；
+               core 下模型可用 tool_search / tool_load 按需加载扩展工具
     /model     模型路由：/model router on 用便宜模型跑上下文压缩与只读检索，
                主对话与写文件仍用主模型；/model fast 设快速模型；/model 看状态
     /remote    手机指挥台：/remote on 开启（仅局域网），/remote code 生成 6 位配对码，
@@ -452,7 +462,7 @@ U 盘密码（v1.37.0 起）：
 
 【技能 Skills】把"这类活该怎么干"存成文件，命中就照做
 技能就是一份 Markdown 流程文档，放在下面任一位置即可被自动发现
-（项目级同名覆盖全局）：
+（项目级同名覆盖全局；内置技能优先级最低）：
     <工作目录>\.harness\skills\<技能名>\SKILL.md
     <工作目录>\.harness\skills\<技能名>.md
     %APPDATA%\Win7Harness\skills\<技能名>\SKILL.md
@@ -461,16 +471,24 @@ U 盘密码（v1.37.0 起）：
     name: go-fix-loop
     description: Go 编译失败的定位与修复
     when: 改完 Go 代码需要验证时
+    category: 修复
+    tags: go, build, test
+    version: 1
     ---
     1. 先 go build ./...
     2. 读第一条错误，用 code_search 定位
     3. 小步改，改完 go test ./...
 说明：
-  · 技能清单会自动注入系统提示（只给名字与用途，不占上下文），
-    模型判断任务匹配时会用 skill_use 工具加载正文，再照着步骤做
-  · 首次启动会自动放一个示例技能 go-fix-loop 到全局 skills 目录，
-    照着它改一份就是自己的技能
-  · /skills 看清单，/skill 名称 手动加载
+  · 程序内置 9 个技能（repo-onboarding / go-fix-loop / bug-repro /
+    safe-refactor / review-diff / win7-compat / release-check /
+    incident-triage / context-recovery），随 exe 分发，不需要联网或安装；
+    扩展页 → 技能 可以预览、复制到项目、启用/禁用
+  · 技能清单只给名字与一句用途，正文按需加载；模型匹配时会用 skill_use
+    加载正文，同一技能本会话只完整注入一次
+  · /skills 看清单，/skill 名称 激活，/skill off 取消；
+    项目技能来自工作区，按不可信内容对待，破坏性操作仍需用户确认
+  · 内置技能不落盘；想改就点“复制到项目”，在
+    <工作目录>\.harness\skills\<技能名>\SKILL.md 里编辑
 好处：常见任务的"正确做法"不用每次重复交代，也不会因为模型换了一轮就忘。
 
 【自定义命令 Commands】把常用提示词固化成一条 /命令
@@ -1711,4 +1729,39 @@ skill_list / 工作区路径，不会再扫描整个 C:\Users。
 3. 建议
    - 若 Win7 老显卡/16bpp/远程桌面下输入文字仍有彩边，可在
      设置 → 外观 → 兼容渲染（GDI）切换后重启对比。
+
+================================================================
+第三十六节 v1.39.0：注入层、内置技能包与生产化
+================================================================
+
+1. 注入层
+   - 系统提示改为分段组装：核心身份、运行环境红线、用户全局指令、
+     项目约定、技能索引、项目记忆、稳定路径、动态日期/工作区、任务状态。
+   - 日期/工作区概览移到尾部，保护提示缓存稳定前缀；/context 可查看
+     每段字符/token、信任级别、稳定前缀与工具定义数量。
+   - 按 token 估算压缩；少量超大工具结果也会就地压缩；超长输出全文
+     落到本机 artifacts，回灌摘要 + 路径，新增 read_artifact 读取全文。
+
+2. 内置技能
+   - 9 个内置技能随 exe 分发：repo-onboarding、go-fix-loop、bug-repro、
+     safe-refactor、review-diff、win7-compat、release-check、
+     incident-triage、context-recovery。
+   - 项目/全局同名技能优先；/skills off 名称 禁用，/skills on 名称 恢复；
+     扩展页可预览/复制到项目，复制不覆盖已有文件。
+   - /skill 名称 激活正文，/skill off 取消；同一技能本会话只完整注入一次。
+   - 系统提示尾部会按当前任务推荐最多 3 个“可能相关”的技能。
+
+3. 工具与上下文
+   - 工具定义按 profile/计划模式/子代理白名单裁剪并稳定排序；
+     /tools profile auto|core|full 切换；core 下可用 tool_search/tool_load
+     按需加载扩展工具。
+   - edit_file/write_file/apply_patch 的工具卡可展开看 diff（只给界面看）。
+   - 右侧检查器新增上下文预算和会话时间线（压缩/错误/写文件/测试等）。
+
+4. 提示缓存
+   - /context window 32k 设置上下文窗口；
+   - /context cache auto|off|anthropic 设置缓存策略。
+     auto 只对已知支持 cache_control 的网关启用，普通 OpenAI 兼容端点
+     仍发送纯字符串 content，不会因为缓存标记变成 400。
+
 

@@ -325,10 +325,12 @@ func (e *Engine) SpawnBatch(tasks []tools.BatchTask) (string, error) {
 				sub.Confirm = e.Confirm
 				sub.ConfirmDiff = e.ConfirmDiff
 				sub.PlanMode = e.PlanMode
+				sub.SystemExtra = subResultFormat
 				sub.depth = e.depth + 1
 				// 与 spawnSubWithDef 对齐：并行写子代理同等遵守权限策略——
 				// 此前从不设 Policy，deny/ask 规则与路径判定全部失效。
 				sub.Policy = e.Policy.Clone()
+				sub.ToolProfile = e.ToolProfile
 				sub.maxRound = DefaultSubRounds()
 				var content strings.Builder
 				var lastErr string

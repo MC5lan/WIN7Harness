@@ -584,7 +584,13 @@ func caseSkills(e *env) (Status, string, string) {
 	if blk := skills.Block(e.workDir); !strings.Contains(blk, "st-skill") {
 		return StatusFail, "系统提示未注入技能清单", "检查 buildContext 是否拼接 skills.Block"
 	}
-	return StatusPass, "技能可发现、正文可加载、提示已注入", ""
+	if n := skills.BuiltinCount(); n < 8 {
+		return StatusFail, fmt.Sprintf("内置技能只有 %d 个", n), "检查 internal/skills/builtin 的 go:embed"
+	}
+	if blk := skills.Block(e.workDir); !strings.Contains(blk, "repo-onboarding") {
+		return StatusFail, "内置技能未进入系统提示清单", "检查 skills.Block 是否合并 BuiltinSkills"
+	}
+	return StatusPass, "技能可发现、正文可加载、内置技能已打包、提示已注入", ""
 }
 
 // caseIndexIncremental 验证写完文件后索引能同步，且脏文件被强制重解析。

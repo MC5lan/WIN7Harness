@@ -8,6 +8,7 @@ import (
 	"time"
 	"win7harness/internal/agent"
 	"win7harness/internal/core"
+	"win7harness/internal/llm"
 	"win7harness/internal/ui"
 	"win7harness/internal/ui/kit"
 )
@@ -40,6 +41,9 @@ type Conv struct {
 	Msgs  []Message `json:"msgs"`
 	At    time.Time `json:"at"`
 	Tok   int       `json:"tok"`
+	// EngineMsgs 是恢复给 Agent 的结构化轨迹（含工具调用/结果）。
+	// 只保存最近一段并去掉图片载荷；旧会话没有该字段时回落到 Msgs 文本回灌。
+	EngineMsgs []llm.Message `json:"engine_msgs,omitempty"`
 	// Pinned 置顶会话：长期在用的项目对话置顶后不会随新会话沉下去。
 	Pinned bool `json:"pinned,omitempty"`
 

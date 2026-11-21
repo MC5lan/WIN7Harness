@@ -37,28 +37,70 @@ func (a *App) slashGoal(rest string) bool {
 // slashSkills 处理 /skills 及别名。
 func (a *App) slashSkills(rest string) bool {
 	// 无参打开扩展页：清单做成列表比在聊天里贴一段更能用（能打开正文文件）。
-	// 带参数（/skills list）仍走文字版，方便脚本化与日志留痕。
+	// /skills off 名称 / on 名称 管理禁用列表；/skills list 仍走文字版。
 	if strings.TrimSpace(rest) == "" {
 		a.page = PageExt
 		a.extTab = extTabSkills
 		return true
 	}
-	list := skills.Scan(a.cfg.WorkDir)
+	fields := strings.Fields(rest)
+	if len(fields) >= 2 && (strings.EqualFold(fields[0], "off") || strings.EqualFold(fields[0], "on")) {
+		name := strings.TrimSpace(strings.Join(fields[1:], " "))
+		enable := strings.EqualFold(fields[0], "on")
+		if a.cfg == nil || name == "" {
+			return true
+		}
+		var next []string
+		found := false
+		for _, n := range a.cfg.DisabledSkills {
+			if strings.EqualFold(strings.TrimSpace(n), name) {
+				found = true
+				if !enable {
+					next = append(next, n)
+				}
+				continue
+			}
+			next = append(next, n)
+		}
+		if !enable && !found {
+			next = append(next, name)
+		}
+		a.cfg.DisabledSkills = next
+		if err := a.cfg.Save(); err != nil {
+			a.toast("保存失败："+err.Error(), true)
+			return true
+		}
+		if !enable && a.eng != nil && strings.EqualFold(a.eng.ActiveSkill(), name) {
+			a.eng.ClearActiveSkill()
+		}
+		a.uiDataDrop()
+		if enable {
+			a.sysNote("已启用技能：" + name)
+		} else {
+			a.sysNote("已禁用技能：" + name + "（项目/全局同名技能也会一起隐藏；再用 `/skills on 名称` 恢复）")
+		}
+		return true
+	}
+	wd := a.convWorkDir()
+	list := skills.ScanMeta(wd)
 	if len(list) == 0 {
 		a.sysNote(fmt.Sprintf("暂无技能。把流程文档放到下面任一位置即可被自动发现：\n%s\\<技能名>\\SKILL.md\n%s\\<技能名>.md",
-			skills.ProjectDir(a.cfg.WorkDir), skills.GlobalDir()))
+			skills.ProjectDir(wd), skills.GlobalDir()))
 		return true
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "可用技能 %d 个：\n", len(list))
 	for _, sk := range list {
 		scope := "项目"
-		if sk.Scope == "global" {
+		switch sk.Scope {
+		case "global":
 			scope = "全局"
+		case "builtin":
+			scope = "内置"
 		}
 		fmt.Fprintf(&b, "- %s（%s）%s\n", sk.Name, scope, sk.Desc)
 	}
-	b.WriteString("用 /skill 名称 加载正文，模型侧会自动用 skill_use 加载。")
+	b.WriteString("用 /skill 名称 激活技能；激活后下一轮会把正文注入上下文。模型侧也会按需用 skill_use 加载。")
 	a.sysNote(b.String())
 	return true
 }
@@ -88,15 +130,65 @@ func (a *App) slashCommands(rest string) bool {
 func (a *App) slashSkill(rest string) bool {
 	name := strings.TrimSpace(rest)
 	if name == "" {
-		a.sysNote("用法：/skill 技能名（先用 /skills 看清单）")
+		a.sysNote("用法：/skill 技能名（先用 /skills 看清单）；/skill off 取消当前技能")
 		return true
 	}
-	sk, ok := skills.Find(a.cfg.WorkDir, name)
-	if !ok {
-		a.sysNote("没有名为“" + name + "”的技能，先用 /skills 查看清单。")
+	if a.eng == nil {
+		a.sysNote("模型还没配置好，技能需要在会话里激活。")
 		return true
 	}
-	a.sysNote(fmt.Sprintf("技能 %s 已就绪（%s）。直接说要做的事，我会按该流程执行。", sk.Name, sk.Path))
+	if strings.EqualFold(name, "off") || strings.EqualFold(name, "clear") {
+		a.eng.ClearActiveSkill()
+		a.sysNote("已取消当前激活技能。")
+		return true
+	}
+	used, err := a.eng.ActivateSkill(name)
+	if err != nil {
+		a.sysNote(err.Error() + "，先用 /skills 查看清单。")
+		return true
+	}
+	a.sysNote(fmt.Sprintf("技能 %s 已激活。下一轮会把正文注入上下文；不需要时说 /skill off。", used))
+	a.toast("已激活技能："+used, false)
+	return true
+}
+
+// slashInstructions 维护用户全局指令（注入系统提示的用户段，优先于项目约定）。
+func (a *App) slashInstructions(rest string) bool {
+	rest = strings.TrimSpace(rest)
+	if a.cfg == nil {
+		return true
+	}
+	if a.streaming {
+		a.toast("生成中不能改全局指令，先停止或等本轮结束", true)
+		return true
+	}
+	switch strings.ToLower(rest) {
+	case "":
+		if strings.TrimSpace(a.cfg.SystemPrompt) == "" {
+			a.sysNote("还没有用户全局指令。用法：`/instructions 回答用中文，先给结论，不要寒暄`；清除：`/instructions clear`。\n它会注入系统提示的用户段，优先于项目约定，但不能覆盖安全边界。")
+		} else {
+			a.sysNote("当前用户全局指令：\n\n" + a.cfg.SystemPrompt + "\n\n修改：`/instructions 新内容`；清除：`/instructions clear`。")
+		}
+		return true
+	case "clear", "off", "reset":
+		a.cfg.SystemPrompt = ""
+	default:
+		if len([]rune(rest)) > 4000 {
+			rest = string([]rune(rest)[:4000]) + "…"
+		}
+		a.cfg.SystemPrompt = rest
+	}
+	if err := a.cfg.Save(); err != nil {
+		a.toast("保存失败："+err.Error(), true)
+		return true
+	}
+	// 引擎按配置重建；先把结构化轨迹落进会话，再按新配置恢复，避免丢上下文。
+	if cv := a.currentConv(); cv != nil {
+		a.syncEngineTranscript(cv)
+	}
+	a.rebuildEngine()
+	a.restoreHistory()
+	a.sysNote("用户全局指令已更新，下一轮生效。")
 	return true
 }
 

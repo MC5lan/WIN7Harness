@@ -112,6 +112,8 @@ func New(cfg *core.Config, w *ui.Window) *App {
 	// 页面数据（技能/记忆/崩溃报告/网卡/git 身份）改由后台刷新：
 	// 绘制线程永不为了一个页签去 ReadDir 或起 git 子进程。
 	a.startPageDataLoop()
+	// 工具全文仓库只保留有限数量，启动时后台清理一次。
+	core.SafeGo("app:prune-artifacts", func() { core.PruneArtifacts(30*24*time.Hour, 800) })
 	// 首次启动投放一个示例技能，用户 /skills 就能看到模板；已有技能时不打扰。
 	skills.EnsureSample(cfg.WorkDir)
 	a.uiDataDrop()
@@ -770,15 +772,20 @@ func (a *App) loadConv() {
 		appImgs.Clear()
 		if a.eng != nil {
 			a.eng.Reset()
-			// 恢复历史（只恢复 user/assistant 文本，工具细节不重放）
-			for _, m := range conv.Msgs {
-				if m.Role == "user" || (m.Role == "assistant" && m.Text != "") {
-					text := m.Text
-					// 历史图片不重复上送（每张都带会迅速吃满上下文），只在文本里标注
-					if len(m.Images) > 0 {
-						text += fmt.Sprintf("\n（此处原有 %d 张图片，历史上下文已省略）", len(m.Images))
+			if len(conv.EngineMsgs) > 0 {
+				// 新格式：恢复结构化轨迹（含工具调用/结果），重启后模型仍知道改过什么。
+				a.eng.LoadHistory(conv.EngineMsgs)
+			} else {
+				// 旧会话兼容：只恢复 user/assistant 文本，工具细节不重放。
+				for _, m := range conv.Msgs {
+					if m.Role == "user" || (m.Role == "assistant" && m.Text != "") {
+						text := m.Text
+						// 历史图片不重复上送（每张都带会迅速吃满上下文），只在文本里标注
+						if len(m.Images) > 0 {
+							text += fmt.Sprintf("\n（此处原有 %d 张图片，历史上下文已省略）", len(m.Images))
+						}
+						a.eng.Messages = append(a.eng.Messages, llm.Message{Role: m.Role, Content: text})
 					}
-					a.eng.Messages = append(a.eng.Messages, llm.Message{Role: m.Role, Content: text})
 				}
 			}
 		}

@@ -113,9 +113,11 @@ func (c *Client) chatOnce(ctx context.Context, msgs []Message, tools []ToolDef,
 	if len(msgs) == 0 {
 		return Usage{}, "", false, errors.New("消息为空")
 	}
+	wireMsgs := sanitize(msgs)
+	c.markPromptCache(wireMsgs)
 	req := chatRequest{
 		Model:       c.Model,
-		Messages:    sanitize(msgs),
+		Messages:    wireMsgs,
 		Stream:      true,
 		Temperature: temp,
 		MaxTokens:   maxTokens,

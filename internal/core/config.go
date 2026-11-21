@@ -15,7 +15,7 @@ import (
 var errEmptyDir = errors.New("目录路径为空")
 
 // Version 是应用版本号，同时用于配置迁移判断。
-const Version = "1.38.1"
+const Version = "1.39.0"
 
 // PresetVersion 是接入预设的版本号。v3 起不再内置任何模型名：
 // 应用只认识 OpenAI 兼容协议，模型 ID 由用户填写或从端点 /models 动态拉取。
@@ -223,6 +223,14 @@ type Config struct {
 	// ContextWindow 模型的上下文窗口（token）。自动压缩阈值按它算：
 	// 换了窗口更大的模型，就不该还沿用旧模型的小阈值。0 = 按 128k 估算。
 	ContextWindow int `json:"context_window,omitempty"`
+	// ToolProfile 控制每轮发给模型的工具定义：auto（默认，按窗口自动）/ full / core / plan。
+	// plan 模式另外会强制只读，和这里的值无关。
+	// 工具太多会挤占上下文，也会诱导模型调用用不上的工具。
+	ToolProfile string `json:"tool_profile,omitempty"`
+	// DisabledSkills 禁用指定技能（内置技能也可禁用），按名称不区分大小写。
+	DisabledSkills []string `json:"disabled_skills,omitempty"`
+	// PromptCache 控制 Anthropic 风格 cache_control：auto（默认，只对已知网关）/ off / anthropic。
+	PromptCache string `json:"prompt_cache,omitempty"`
 	// SubAgentTimeoutSec 单个子代理任务的超时（秒）。0 = 默认 20 分钟。
 	// 老值硬编码 8 分钟，分析一个大模块 + 跑一次构建必然超时。
 	SubAgentTimeoutSec int `json:"subagent_timeout_sec,omitempty"`
@@ -359,6 +367,8 @@ func DefaultConfig() *Config {
 		// 新配置默认开启自动验证：改完代码先构建+测试，失败回灌给模型继续修。
 		// 老配置没有该字段时仍按 off 处理，用户可在设置 → 外观里手动打开。
 		VerifyMode:   "auto",
+		ToolProfile:  "auto",
+		PromptCache:  "auto",
 		KeyBindings:  DefaultKeyBindings(),
 		ShowThinking: true,
 		// 8 千字符约等于 2 千 token，够放结论与关键证据，又不至于挤掉主对话的上下文
@@ -596,8 +606,38 @@ func (c *Config) Normalize() {
 	if c.ContextWindow < 0 {
 		c.ContextWindow = 0
 	}
+	switch strings.ToLower(strings.TrimSpace(c.ToolProfile)) {
+	case "full", "core", "plan":
+		c.ToolProfile = strings.ToLower(strings.TrimSpace(c.ToolProfile))
+	default:
+		c.ToolProfile = "auto"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.PromptCache)) {
+	case "off", "anthropic", "auto":
+		c.PromptCache = strings.ToLower(strings.TrimSpace(c.PromptCache))
+	default:
+		c.PromptCache = "auto"
+	}
 	if c.SubAgentTimeoutSec < 0 {
 		c.SubAgentTimeoutSec = 0
+	}
+	// 禁用技能列表去空、去重（保留大小写，匹配时忽略大小写）。
+	if len(c.DisabledSkills) > 0 {
+		seen := map[string]bool{}
+		out := c.DisabledSkills[:0]
+		for _, n := range c.DisabledSkills {
+			n = strings.TrimSpace(n)
+			if n == "" {
+				continue
+			}
+			key := strings.ToLower(n)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, n)
+		}
+		c.DisabledSkills = out
 	}
 	if c.TimeoutSec <= 0 {
 		c.TimeoutSec = 300

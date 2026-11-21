@@ -16,10 +16,13 @@ import (
 
 // ToolCard 一次工具调用在界面上的呈现。
 type ToolCard struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
-	Args     string        `json:"args,omitempty"`
-	Output   string        `json:"output,omitempty"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Args   string `json:"args,omitempty"`
+	Output string `json:"output,omitempty"`
+	// Detail 是只给界面看的结构化细节（edit_file/apply_patch 的 diff），
+	// 不进入模型上下文；会话落盘时随 ToolCard 保存，方便回看。
+	Detail   string        `json:"detail,omitempty"`
 	Done     bool          `json:"done,omitempty"`
 	Err      bool          `json:"err,omitempty"`
 	Expanded bool          `json:"expanded,omitempty"`
@@ -40,7 +43,10 @@ type HitView struct {
 
 // Message 一条会话消息。
 type Message struct {
-	Role      string      `json:"role"` // user / assistant
+	Role string `json:"role"` // user / assistant
+	// Kind 是界面上的消息类别：notice / budget / error / hits / normal。
+	// 旧会话没有该字段时按普通消息处理。
+	Kind      string      `json:"kind,omitempty"`
 	Text      string      `json:"text,omitempty"`
 	Reasoning string      `json:"reasoning,omitempty"`
 	Tools     []*ToolCard `json:"tools,omitempty"`
@@ -95,16 +101,63 @@ func ToolTitle(name string) string {
 		return "搜索内容"
 	case "run_command":
 		return "执行命令"
+	case "run_tests":
+		return "运行测试"
 	case "delete_path":
 		return "删除"
 	case "todo_write":
 		return "更新计划"
 	case "code_search":
 		return "检索代码"
+	case "calls":
+		return "查调用关系"
+	case "repo_map":
+		return "仓库地图"
+	case "diagnostics":
+		return "编译诊断"
+	case "lsp":
+		return "语言服务"
+	case "toolchain":
+		return "工具链检查"
+	case "quality":
+		return "覆盖与性能"
+	case "datatable":
+		return "表格查询"
+	case "read_image":
+		return "读取图片"
+	case "read_artifact":
+		return "读取完整输出"
+	case "web_fetch":
+		return "抓取网页"
+	case "web_search":
+		return "联网搜索"
+	case "history_search":
+		return "检索历史"
+	case "memory_list":
+		return "查看记忆"
+	case "memory_search":
+		return "检索记忆"
+	case "memory_save":
+		return "保存记忆"
+	case "skill_list":
+		return "列出技能"
+	case "skill_use":
+		return "加载技能"
+	case "tool_search":
+		return "搜索工具"
+	case "tool_load":
+		return "加载工具"
 	case "task":
 		return "派发子任务"
-	case "fetch_url":
-		return "抓取网页"
+	case "task_list":
+		return "后台任务"
+	case "task_output":
+		return "读取任务输出"
+	case "task_kill":
+		return "终止任务"
+	}
+	if strings.HasPrefix(name, "mcp_") {
+		return "MCP 工具"
 	}
 	return name
 }
@@ -127,7 +180,7 @@ func ArgSummary(name, raw string) string {
 		}
 		return ""
 	}
-	s := pick("command", "path", "pattern", "url")
+	s := pick("command", "path", "pattern", "url", "query", "name", "description", "prompt")
 	s = strings.ReplaceAll(s, "\n", " ⏎ ")
 	if len([]rune(s)) > 90 {
 		s = string([]rune(s)[:90]) + "…"
@@ -244,6 +297,7 @@ func msgSig(m *Message) uint64 {
 		mix(uint64(len(t.Name)) + 5)
 		mix(uint64(len(t.Args)) + 7)
 		mix(uint64(len(t.Output)) + 11)
+		mix(uint64(len(t.Detail)) + 13)
 		var f uint64
 		if t.Done {
 			f |= 1
@@ -371,6 +425,10 @@ func buildMsgItems(c *ui.Canvas, m *Message, width int32, showThink bool, th *ui
 		if t.Expanded || (!t.Done && t.Output != "") {
 			outLines := ui.LayoutMarkdown(c, ui.ParseMarkdown("```\n"+tailLines(t.Output, 24)+"\n```"), width-24, ui.FsSm, th)
 			h = 56 + ui.LayoutHeight(outLines) + 8
+		}
+		if t.Expanded && t.Detail != "" {
+			detailLines := ui.LayoutMarkdown(c, ui.ParseMarkdown("```diff\n"+tailLines(t.Detail, 30)+"\n```"), width-24, ui.FsSm, th)
+			h += ui.LayoutHeight(detailLines) + 8
 		}
 		add(visItem{kind: itemTool, toolIdx: ti, h: h + 8, tool: t, msg: m})
 		ti++
@@ -736,6 +794,10 @@ func (a *App) drawToolCard(u *UI, it visItem, ox, top int32, clip ui.Rect) {
 	if expanded {
 		outLines := ui.LayoutMarkdown(c, ui.ParseMarkdown("```\n"+tailLines(t.Output, 24)+"\n```"), r.W-24, ui.FsSm, th)
 		ui.DrawLines(c, outLines, r.X+12, r.Y+42, clip, th)
+		if t.Expanded && t.Detail != "" {
+			detailLines := ui.LayoutMarkdown(c, ui.ParseMarkdown("```diff\n"+tailLines(t.Detail, 30)+"\n```"), r.W-24, ui.FsSm, th)
+			ui.DrawLines(c, detailLines, r.X+12, r.Y+42+ui.LayoutHeight(outLines)+4, clip, th)
+		}
 		return
 	}
 	// 折叠态给一行结果预览：判断"这次调用到底成没成"不该逼用户点开卡片。

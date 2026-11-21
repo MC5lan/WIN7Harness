@@ -72,6 +72,10 @@ func startOne(spec core.MCPServer) (int, error) {
 
 	count := 0
 	for _, info := range list {
+		if count >= 32 {
+			core.Logf("mcp: 服务 %q 工具超过 32 个，后续工具未注册（避免工具 schema 挤占上下文）", spec.Name)
+			break
+		}
 		toolName := toolNameFor(spec.Name, info.Name)
 		schema := string(info.InputSchema)
 		if strings.TrimSpace(schema) == "" || schema == "null" {
@@ -80,17 +84,25 @@ func startOne(spec core.MCPServer) (int, error) {
 		if !json.Valid([]byte(schema)) {
 			continue
 		}
+		if len(schema) > 32<<10 {
+			schema = `{"type":"object","properties":{}}`
+		}
 		mcpName := info.Name
 		server := spec.Name
-		desc := info.Description
-		if strings.TrimSpace(desc) == "" {
+		desc := strings.TrimSpace(info.Description)
+		if desc == "" {
 			desc = "MCP 工具 " + mcpName
 		}
+		// MCP 描述与 schema 都属于外部输入：限长，避免一个服务把工具定义撑爆。
+		desc = truncateRunes(desc, 2000)
 		desc = fmt.Sprintf("[MCP:%s] %s", server, desc)
 		tools.RegisterDynamic(tools.Tool{
-			Name:   toolName,
-			Desc:   desc,
-			Schema: schema,
+			Name:      toolName,
+			Desc:      desc,
+			Schema:    schema,
+			Category:  "mcp",
+			Trust:     "external",
+			MaxOutput: 12000,
 			Run: func(ctx *tools.Context, args map[string]interface{}) (tools.Result, error) {
 				cli := findClient(server)
 				if cli == nil {
@@ -106,7 +118,17 @@ func startOne(spec core.MCPServer) (int, error) {
 				if strings.TrimSpace(out) == "" {
 					out = "（无输出）"
 				}
-				return tools.Result{Output: out}, nil
+				// MCP 返回属于外部内容：先摘要再回灌，全文不直接塞进主上下文。
+				if len(out) > 12000 {
+					summary := tools.SummarizeToolOutput(out, 12000)
+					if ctx != nil {
+						if p, err := core.SpillArtifact(ctx.WorkDir, toolName, out); err == nil && p != "" {
+							summary += "\n\n（完整输出已保存到 " + p + "；需要细节时用 read_artifact 读取。）"
+						}
+					}
+					out = summary
+				}
+				return tools.Result{Output: out, Trust: "external"}, nil
 			},
 		})
 		mu.Lock()
@@ -115,6 +137,14 @@ func startOne(spec core.MCPServer) (int, error) {
 		count++
 	}
 	return count, nil
+}
+
+func truncateRunes(s string, n int) string {
+	r := []rune(strings.TrimSpace(s))
+	if n <= 0 || len(r) <= n {
+		return string(r)
+	}
+	return string(r[:n]) + "…"
 }
 
 func findClient(name string) *Client {

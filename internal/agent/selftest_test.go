@@ -20,7 +20,7 @@ func TestExecBatchParallelOrder(t *testing.T) {
 		{id: "3", name: "list_dir", args: `{}`},
 		{id: "4", name: "nope", args: `{}`},
 	}
-	outs, durs := e.execBatch(context.Background(), calls)
+	outs, _, durs := e.execBatch(context.Background(), calls)
 	if !strings.Contains(outs[0], "AAA") || !strings.Contains(outs[1], "BBB") {
 		t.Fatalf("并行读取结果错位: %q / %q", outs[0], outs[1])
 	}
@@ -50,7 +50,7 @@ func TestPlanModeBlocksWriteTools(t *testing.T) {
 	e := New(nil, "test-model", ".")
 	e.PlanMode = true
 
-	out := e.execTool("write_file", `{"path":"plan_mode_probe.txt","content":"x"}`)
+	out, _ := e.execTool("write_file", `{"path":"plan_mode_probe.txt","content":"x"}`)
 	if !strings.HasPrefix(out, "错误：") || !strings.Contains(out, "计划模式") {
 		t.Fatalf("计划模式未拦截写盘: %q", out)
 	}
@@ -60,7 +60,7 @@ func TestPlanModeBlocksWriteTools(t *testing.T) {
 	}
 
 	// 只读工具照常可用
-	out = e.execTool("list_dir", `{"path":"."}`)
+	out, _ = e.execTool("list_dir", `{"path":"."}`)
 	if strings.HasPrefix(out, "错误：") {
 		t.Fatalf("只读工具被误拦截: %q", out)
 	}

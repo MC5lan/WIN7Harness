@@ -336,12 +336,18 @@ func (r *runner) run(prompt string, no, line int) taskResult {
 		idle = 30 * time.Second
 	}
 	// 等引擎真正停下来：子 Agent 也会发 turn_end，只看事件会误判提前结束。
-	deadline := time.After(idle + 30*time.Second)
+	// turn_end 是在 loop 返回前发出的，此时 running 还没清；必须再等引擎收尾，
+	// 否则会一直等到 deadline（实测技能加载类任务会白等 150 秒）。
+	deadline := time.NewTimer(idle + 30*time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
 	timedOut := false
 	for {
 		select {
 		case <-r.finished:
-		case <-deadline:
+		case <-ticker.C:
+		case <-deadline.C:
 			r.eng.Stop()
 			timedOut = true
 			fmt.Fprintln(os.Stderr, "任务超时，已中断。")

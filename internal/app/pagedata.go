@@ -155,7 +155,7 @@ func (a *App) refreshPageData(force bool) {
 	next.metrics = prev.metrics
 
 	if wd != "" {
-		next.skills = skills.Scan(wd)
+		next.skills = skills.ScanMeta(wd)
 		next.agents, next.agentsWarn = core.LoadAgentDefs(wd)
 		next.memory = core.LoadMemory(wd)
 	} else {

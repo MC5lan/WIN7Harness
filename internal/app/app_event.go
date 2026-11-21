@@ -202,6 +202,7 @@ func (a *App) onStreamEvent(ev agent.Event, m *Message) {
 			for i := len(m.Tools) - 1; i >= 0; i-- {
 				if m.Tools[i].ID == ev.ID || (ev.ID == "" && !m.Tools[i].Done) {
 					m.Tools[i].Output = ev.Text
+					m.Tools[i].Detail = ev.Detail
 					m.Tools[i].Done = true
 					m.Tools[i].Err = ev.Err
 					// 用引擎测出的真实耗时：事件跨 goroutine 送到界面会有延迟，
@@ -259,10 +260,11 @@ func (a *App) onTurnEnd(ev agent.Event, conv *Conv, m *Message) {
 func (a *App) onErrorEvent(ev agent.Event, m *Message) {
 	a.forceFull = true
 	if m != nil {
+		m.Kind = "error"
 		m.Err = ev.Text
 		m.Streaming = false
 	} else {
-		a.msgs = append(a.msgs, Message{Role: "assistant", Err: ev.Text, At: time.Now()})
+		a.msgs = append(a.msgs, Message{Role: "assistant", Kind: "error", Err: ev.Text, At: time.Now()})
 	}
 	a.streaming = false
 	a.observeTurn(false)
@@ -310,7 +312,7 @@ func (a *App) onMiscEvent(ev agent.Event, m *Message) {
 		a.statusMsg = "方案待确认：在弹窗中选择批准、拒绝或修改"
 	case "notice":
 		a.forceFull = true
-		a.msgs = append(a.msgs, Message{Role: "assistant", Text: ev.Text, At: time.Now()})
+		a.msgs = append(a.msgs, Message{Role: "assistant", Kind: "notice", Text: ev.Text, At: time.Now()})
 		a.autoScroll = true
 		a.saveConv()
 	case "budget":
@@ -320,7 +322,7 @@ func (a *App) onMiscEvent(ev agent.Event, m *Message) {
 		}
 		a.streaming = false
 		a.curAsst = -1
-		a.msgs = append(a.msgs, Message{Role: "assistant", Err: ev.Text, At: time.Now()})
+		a.msgs = append(a.msgs, Message{Role: "assistant", Kind: "budget", Err: ev.Text, At: time.Now()})
 		a.autoScroll = true
 		a.saveConv()
 		a.journalFinish()

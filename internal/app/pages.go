@@ -51,6 +51,8 @@ func (a *App) initForms() {
 	a.ui.SetField("set.subto", fmt.Sprintf("%d", a.cfg.SubAgentTimeoutSec))
 	a.ui.SetField("set.pricein", fmt.Sprintf("%g", a.cfg.PriceIn))
 	a.ui.SetField("set.priceout", fmt.Sprintf("%g", a.cfg.PriceOut))
+	a.ui.SetField("set.sysprompt", a.cfg.SystemPrompt)
+	a.ui.SetField("set.toolprofile", a.cfg.ToolProfile)
 	a.presetIdx = a.cfg.ActiveProvider
 }
 
@@ -620,6 +622,16 @@ func (a *App) saveSettings() {
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.subto", "").String()), "%d", &a.cfg.SubAgentTimeoutSec)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.pricein", "").String()), "%f", &a.cfg.PriceIn)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.priceout", "").String()), "%f", &a.cfg.PriceOut)
+	a.cfg.SystemPrompt = strings.TrimSpace(a.ui.Field("set.sysprompt", "").String())
+	if len([]rune(a.cfg.SystemPrompt)) > 4000 {
+		a.cfg.SystemPrompt = string([]rune(a.cfg.SystemPrompt)[:4000])
+	}
+	a.cfg.ToolProfile = strings.ToLower(strings.TrimSpace(a.ui.Field("set.toolprofile", "").String()))
+	switch a.cfg.ToolProfile {
+	case "auto", "core", "full", "plan":
+	default:
+		a.cfg.ToolProfile = "auto"
+	}
 	if a.cfg.PriceIn < 0 {
 		a.cfg.PriceIn = 0
 	}

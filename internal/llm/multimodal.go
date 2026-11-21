@@ -12,6 +12,14 @@ type Part struct {
 	Type     string    `json:"type"` // text | image_url
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
+	// CacheControl 只对支持 Anthropic 风格提示缓存的网关有效；
+	// 普通 OpenAI 兼容端点不会收到该字段（见 Message.Cache）。
+	CacheControl *CacheControl `json:"cache_control,omitempty"`
+}
+
+// CacheControl 是 Anthropic 风格提示缓存的标记。
+type CacheControl struct {
+	Type string `json:"type"` // ephemeral
 }
 
 // ImageURL 图片地址，支持 data URL（data:image/png;base64,...）与 http(s) 链接。
@@ -77,7 +85,15 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		parts = append(parts, m.Parts...)
 		w.Content = parts
 	} else if m.Content != "" {
-		w.Content = m.Content
+		if m.Cache {
+			// Anthropic 风格缓存标记：content 必须是 block 数组，不能是纯字符串。
+			w.Content = []Part{{
+				Type: "text", Text: m.Content,
+				CacheControl: &CacheControl{Type: "ephemeral"},
+			}}
+		} else {
+			w.Content = m.Content
+		}
 	}
 	return json.Marshal(w)
 }

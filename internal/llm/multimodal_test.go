@@ -83,6 +83,47 @@ func TestMessageToolFieldsPreserved(t *testing.T) {
 	}
 }
 
+func TestMessageJSONPromptCache(t *testing.T) {
+	m := Message{Role: "system", Content: "稳定前缀", Cache: true}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Content []Part `json:"content"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("cache 消息 content 应为数组：%s", string(b))
+	}
+	if len(got.Content) != 1 || got.Content[0].CacheControl == nil || got.Content[0].CacheControl.Type != "ephemeral" {
+		t.Fatalf("cache_control 未写入：%s", string(b))
+	}
+	// 未打标的消息必须保持字符串，不能影响普通端点。
+	plain, _ := json.Marshal(Message{Role: "system", Content: "普通"})
+	if !strings.Contains(string(plain), `"content":"普通"`) {
+		t.Fatalf("普通消息被改成数组：%s", string(plain))
+	}
+}
+
+func TestShouldCacheSystem(t *testing.T) {
+	c := &Client{BaseURL: "https://openrouter.ai/api/v1", Model: "anthropic/claude-3.5-sonnet", PromptCache: "auto"}
+	if !c.shouldCacheSystem() {
+		t.Fatal("OpenRouter + Claude 应自动启用")
+	}
+	c.Model = "deepseek-chat"
+	if c.shouldCacheSystem() {
+		t.Fatal("未知模型不应自动启用")
+	}
+	c.PromptCache = "anthropic"
+	if !c.shouldCacheSystem() {
+		t.Fatal("显式 anthropic 应启用")
+	}
+	c.PromptCache = "off"
+	if c.shouldCacheSystem() {
+		t.Fatal("off 应关闭")
+	}
+}
+
 func TestImageDataURL(t *testing.T) {
 	u := ImageDataURL("", []byte{1, 2, 3})
 	if !strings.HasPrefix(u, "data:image/png;base64,") {

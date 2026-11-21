@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"win7harness/internal/llm"
+	"win7harness/internal/tools"
 )
 
 // 上下文压缩：对标 Claude Code / Codex 的 auto-compact。
@@ -21,13 +23,8 @@ const (
 	// 留一半给"接下来这一轮"：系统提示、工具结果、模型输出。
 	// 压太早会丢实现细节（模型忘了自己改过哪个文件），压太晚会被网关直接拒。
 	compactRatio = 0.5
-	// charsPerToken 只用于估算。中文为主时 1 token 往往只有 1~2 个字符，
-	// 按 2.5 保守估：宁可略早压缩，也别因为低估而撞上接口的长度上限。
-	charsPerToken = 2.5
 	// defaultContextWindow 是不知道模型窗口时的兜底（主流模型 128k）。
 	defaultContextWindow = 128000
-	// minCompactWater 是下限：小上下文模型也不该每两轮压缩一次。
-	minCompactWater = 40000
 )
 
 // contextWindow 返回本引擎使用的上下文窗口（token）。
@@ -38,22 +35,20 @@ func (e *Engine) contextWindow() int {
 	return defaultContextWindow
 }
 
-// compactWater 返回触发自动压缩的字符阈值。
-//
-// 旧实现写死 9 万字符（≈2.2 万 token）：在 128k 上下文的模型上等于只用了六分之一
-// 就开始压缩，做大型工程时模型会反复"忘记"前面改过的文件——这是比轮数上限
-// 更致命的一条限制。现在按窗口算，模型换了阈值跟着变。
-func (e *Engine) compactWater() int {
-	w := int(float64(e.contextWindow()) * charsPerToken * compactRatio)
-	if w < minCompactWater {
-		w = minCompactWater
+// contextTokenLimit 返回留给“系统提示 + 历史消息”的 token 预算。
+// 只占窗口的一半左右，剩下的留给本轮工具结果、模型输出和估算误差。
+func (e *Engine) contextTokenLimit() int {
+	w := e.contextWindow()
+	limit := int(float64(w) * compactRatio)
+	if limit < 2000 {
+		limit = 2000
 	}
 	// 32 位进程地址空间有限：压缩本身要把历史拼成一份大字符串，
 	// 阈值放太大反而容易 OOM，给个上限。
-	if strconv.IntSize == 32 && w > 200000 {
-		w = 200000
+	if strconv.IntSize == 32 && limit > 60000 {
+		limit = 60000
 	}
-	return w
+	return limit
 }
 
 func estimateChars(msgs []llm.Message) int {
@@ -88,13 +83,43 @@ func messageSize(m *llm.Message) int {
 // compactIfNeeded 在上下文接近预算时自动压缩，返回是否发生压缩。
 func (e *Engine) compactIfNeeded(ctx context.Context) bool {
 	e.mu.Lock()
-	size := estimateChars(e.Messages)
+	size := estimateMessagesTokens(e.Messages)
 	n := len(e.Messages)
 	e.mu.Unlock()
-	if size < e.compactWater() || n < compactMin {
+	if size < e.contextTokenLimit() || n < 2 {
 		return false
 	}
+	// 消息条数少但单条极大（一次 grep/test 输出、超长文件）时，
+	// 摘要压缩没有可切的历史；先把超大工具结果就地压成摘要。
+	if n < compactMin {
+		return e.shrinkLargeToolMessages(ctx)
+	}
 	if _, err := e.Compact(ctx); err == nil {
+		// 摘要后仍可能因为最近几条超大工具结果超预算；就地压缩，避免下一轮再次触发。
+		e.shrinkLargeToolMessages(ctx)
+		return true
+	}
+	return false
+}
+
+// shrinkLargeToolMessages 在无法做历史摘要时，把单条超大工具结果压回预算内。
+// 不删除消息、不破坏 tool 配对，只替换内容；全文可由 artifact/重新读取找回。
+func (e *Engine) shrinkLargeToolMessages(ctx context.Context) bool {
+	const toolTokBudget = 2500
+	e.mu.Lock()
+	changed := 0
+	for i := range e.Messages {
+		m := &e.Messages[i]
+		if m.Role != "tool" || estimateTokens(m.Content) <= toolTokBudget {
+			continue
+		}
+		// 按字符预算调用现有摘要器（约 3 字符/token 的保守换算）。
+		m.Content = tools.SummarizeToolOutput(m.Content, toolTokBudget*3)
+		changed++
+	}
+	e.mu.Unlock()
+	if changed > 0 {
+		e.emit(Event{Kind: "notice", Text: fmt.Sprintf("上下文里 %d 条超长工具结果已就地压缩（原文仍可通过重新读取/日志查看）。", changed)})
 		return true
 	}
 	return false
@@ -145,7 +170,7 @@ func (e *Engine) Compact(ctx context.Context) (string, error) {
 		{Role: "system", Content: "你是对话压缩器。把给定的历史对话压缩成结构化要点，供后续继续工作使用。" +
 			"只输出要点本身，不要寒暄。必须保留：用户目标与约束、已确认的关键事实（文件路径、命令、版本、结论）、" +
 			"已完成的改动、尚未完成的待办、失败过的尝试与其原因。丢弃寒暄与重复内容。中文输出，不超过 600 字。"},
-		{Role: "user", Content: "请压缩以下历史对话：\n\n" + clip(transcript.String(), e.compactWater()*3/2)},
+		{Role: "user", Content: "请压缩以下历史对话：\n\n" + clip(transcript.String(), compactTranscriptChars(e.contextWindow()))},
 	}
 
 	var sb strings.Builder
@@ -190,6 +215,19 @@ func (e *Engine) Compact(ctx context.Context) (string, error) {
 	return fmt.Sprintf("已压缩 %d 条早期对话（%d 字符 → 剩余 %d 条）", len(old), estimateChars(old), len(kept)), nil
 }
 
+// compactTranscriptChars 是送给摘要模型的转录字符上限。
+// 取窗口的 3 倍字符但不超过 20 万，避免 32 位进程一次拼出超大字符串。
+func compactTranscriptChars(window int) int {
+	n := window * 3
+	if n < 40000 {
+		n = 40000
+	}
+	if n > 200000 {
+		n = 200000
+	}
+	return n
+}
+
 func clip(s string, n int) string {
 	s = strings.TrimSpace(s)
 	r := []rune(s)
@@ -204,6 +242,53 @@ func (e *Engine) Stats() (int, int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.Messages), estimateChars(e.Messages)
+}
+
+// ContextInfo 返回上下文占用（条数/字符/token）、窗口与预算，供 /context 与界面展示。
+// 结果缓存 500ms：侧栏每帧都会调用，不能每帧遍历全部历史做 token 估算。
+func (e *Engine) ContextInfo() (msgs, chars, histTokens, window, limit int) {
+	e.ctxMu.Lock()
+	if !e.ctxAt.IsZero() && time.Since(e.ctxAt) < 500*time.Millisecond {
+		msgs, chars, histTokens = e.ctxMsgs, e.ctxChars, e.ctxTokens
+		e.ctxMu.Unlock()
+		window = e.contextWindow()
+		limit = e.contextTokenLimit()
+		return
+	}
+	e.ctxMu.Unlock()
+
+	e.mu.Lock()
+	msgs = len(e.Messages)
+	chars = estimateChars(e.Messages)
+	histTokens = estimateMessagesTokens(e.Messages)
+	e.mu.Unlock()
+
+	e.ctxMu.Lock()
+	e.ctxAt, e.ctxMsgs, e.ctxChars, e.ctxTokens = time.Now(), msgs, chars, histTokens
+	e.ctxMu.Unlock()
+	window = e.contextWindow()
+	limit = e.contextTokenLimit()
+	return
+}
+
+// ToolDefsStats 返回本轮工具定义数量与估算字符数。
+func (e *Engine) ToolDefsStats() (n, chars int) {
+	defs := e.toolDefsForTurn()
+	for _, d := range defs {
+		n++
+		chars += len(d.Function.Name) + len(d.Function.Description) + len(d.Function.Parameters)
+	}
+	return
+}
+
+// ToolDefsTokens 返回本轮工具定义的估算 token 数（计入上下文预算）。
+func (e *Engine) ToolDefsTokens() int {
+	defs := e.toolDefsForTurn()
+	total := 0
+	for _, d := range defs {
+		total += estimateTokens(d.Function.Name) + estimateTokens(d.Function.Description) + estimateTokens(string(d.Function.Parameters))
+	}
+	return total
 }
 
 // CompactCount 返回本次会话的累计压缩次数。

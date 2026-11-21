@@ -116,6 +116,24 @@ func StablePrefix(a, b []Message) int {
 	return n
 }
 
+// StableTextPrefix 返回两段文本的公共前缀字节数（按完整 UTF-8 字符对齐）。
+// 用于本地估算“这一轮系统提示还能命中多少缓存”，不依赖端点的缓存实现。
+func StableTextPrefix(a, b string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	i := 0
+	for i < n && a[i] == b[i] {
+		i++
+	}
+	// 不要把多字节字符从中间切开：回退到最后一个完整 rune 边界。
+	for i > 0 && i < len(a) && a[i]&0xC0 == 0x80 {
+		i--
+	}
+	return i
+}
+
 // HasVolatilePrefix 检查系统提示里是否混入了每轮都会变的内容。
 // 命中时上层会提示用户（或自动清理），否则缓存命中率会一直是 0。
 func HasVolatilePrefix(system string) (string, bool) {

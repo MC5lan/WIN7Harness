@@ -17,6 +17,12 @@ func TestProjectDocAndSnapshot(t *testing.T) {
 	if !contains(block, "禁止引入三方依赖") || !contains(block, "AGENTS.md") {
 		t.Fatalf("项目约定未注入: %q", block)
 	}
+	// 改文件后缓存必须失效，不能继续注入旧约定。
+	os.WriteFile(filepath.Join(root, "proj", "AGENTS.md"), []byte("# 约定\n必须用 spaces，禁止引入内部包。"), 0o644)
+	block = ProjectDocBlock(sub)
+	if !contains(block, "禁止引入内部包") || contains(block, "禁止引入三方依赖") {
+		t.Fatalf("项目约定缓存未失效: %q", block)
+	}
 
 	// 快照：修改已有文件后回滚
 	f := filepath.Join(root, "proj", "a.txt")

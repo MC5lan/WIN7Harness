@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"win7harness/internal/core"
+	"win7harness/internal/llm"
 )
 
 // 会话落盘版本号。将来结构变更时按此字段做迁移，避免旧档读崩。
@@ -451,7 +452,75 @@ func (a *App) saveConv() {
 	cv.Msgs = a.msgs
 	cv.At = time.Now()
 	cv.MsgN = len(a.msgs)
+	// 生成中会把完整引擎历史每 400ms 复制一遍，代价太高；等本轮结束再同步。
+	// 中途崩溃由 journal 兜底，下一次正常保存会补上结构化轨迹。
+	if !a.streaming {
+		a.syncEngineTranscript(cv)
+	}
 	a.queueConvSave(cv)
+}
+
+// syncEngineTranscript 把引擎的结构化消息（含工具调用/结果）快照进会话，
+// 供重启/切模型/切工作区后恢复。只保留最近一段，避免会话文件无限膨胀。
+func (a *App) syncEngineTranscript(cv *Conv) {
+	if cv == nil || a.eng == nil {
+		return
+	}
+	cv.EngineMsgs = pruneEngineMsgs(a.eng.History(), 240, 1<<20)
+}
+
+// pruneEngineMsgs 保留最近 N 条/约 1MB 的结构化消息，并把图片 data URL 去掉。
+// 从尾部向前取，保证最后一轮工具调用/Tool 结果成对；起点落在 tool 上时向前对齐。
+func pruneEngineMsgs(msgs []llm.Message, maxN, maxBytes int) []llm.Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	start := len(msgs)
+	total := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		l := len(msgs[i].Content) + len(msgs[i].Reasoning)
+		for _, tc := range msgs[i].ToolCalls {
+			l += len(tc.Function.Arguments)
+		}
+		for _, p := range msgs[i].Parts {
+			if p.Type == "image_url" {
+				l += 32
+			} else {
+				l += len(p.Text)
+			}
+		}
+		if start < len(msgs) && (len(msgs)-i > maxN || total+l > maxBytes) {
+			break
+		}
+		total += l
+		start = i
+	}
+	for start > 0 && msgs[start].Role == "tool" {
+		start--
+	}
+	out := make([]llm.Message, len(msgs)-start)
+	copy(out, msgs[start:])
+	for i := range out {
+		if len(out[i].Parts) == 0 {
+			continue
+		}
+		// 必须新建切片：out 与引擎历史共享底层数组，原地过滤会把在线上下文里的
+		// 图片也一起删掉（下一轮 hasImagesInContext 就会误判）。
+		kept := make([]llm.Part, 0, len(out[i].Parts))
+		stripped := false
+		for _, p := range out[i].Parts {
+			if p.Type == "image_url" {
+				stripped = true
+				continue
+			}
+			kept = append(kept, p)
+		}
+		out[i].Parts = kept
+		if stripped {
+			out[i].Content += "\n（历史图片已省略，需要时请重新附加）"
+		}
+	}
+	return out
 }
 
 // deleteConvByID 按稳定 ID 删除：确认弹窗打开期间列表可能重新排序，

@@ -84,6 +84,18 @@ func TestStablePrefix(t *testing.T) {
 	}
 }
 
+func TestStableTextPrefix(t *testing.T) {
+	if n := StableTextPrefix("你好世界", "你好，世界"); n != len("你好") {
+		t.Fatalf("公共前缀 = %d，期望 %d", n, len("你好"))
+	}
+	if n := StableTextPrefix("abc", "abcdef"); n != 3 {
+		t.Fatalf("公共前缀 = %d，期望 3", n)
+	}
+	if n := StableTextPrefix("abc", "xyz"); n != 0 {
+		t.Fatalf("公共前缀 = %d，期望 0", n)
+	}
+}
+
 func TestHasVolatilePrefix(t *testing.T) {
 	if _, ok := HasVolatilePrefix("你是助手，当前时间是 12:00"); !ok {
 		t.Fatal("应检测出易变前缀")

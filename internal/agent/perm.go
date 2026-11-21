@@ -113,15 +113,18 @@ func (e *Engine) allowedToolList() string {
 func (e *Engine) setToolAllow(list []string) {
 	if len(list) == 0 {
 		e.toolAllow = nil
-		return
-	}
-	m := make(map[string]bool, len(list))
-	for _, n := range list {
-		if n = strings.TrimSpace(n); n != "" {
-			m[n] = true
+	} else {
+		m := make(map[string]bool, len(list))
+		for _, n := range list {
+			if n = strings.TrimSpace(n); n != "" {
+				m[n] = true
+			}
 		}
+		e.toolAllow = m
 	}
-	e.toolAllow = m
+	e.toolsMu.Lock()
+	e.toolsKey, e.toolsCache, e.extraTools = "", nil, nil
+	e.toolsMu.Unlock()
 }
 
 // AutoApproveDecision 把旧的"自动执行"开关翻译成策略模式，供配置升级使用。
