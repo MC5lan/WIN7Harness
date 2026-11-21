@@ -70,4 +70,5 @@ jobs:
             dist/WIN7Harness-v*-win7.zip
             dist/latest.json
             dist/SHA256SUMS.txt
+          overwrite_files: true
           generate_release_notes: true
