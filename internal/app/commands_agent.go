@@ -45,6 +45,10 @@ func (a *App) slashSkills(rest string) bool {
 	}
 	fields := strings.Fields(rest)
 	if len(fields) >= 2 && (strings.EqualFold(fields[0], "off") || strings.EqualFold(fields[0], "on")) {
+		if a.streaming {
+			a.toast("生成中不能禁用/启用技能，先停止或等本轮结束", true)
+			return true
+		}
 		name := strings.TrimSpace(strings.Join(fields[1:], " "))
 		enable := strings.EqualFold(fields[0], "on")
 		if a.cfg == nil || name == "" {

@@ -171,9 +171,10 @@ func (a *App) applySettingsPreset(i int) {
 	a.presetIdx = i
 	p := a.cfg.Providers[i]
 	a.ui.SetField("set.base", p.BaseURL)
-	if p.NoAuth {
-		a.ui.SetField("set.key", "")
-	}
+	// 每个端点有自己的 Key 和模型：切换接入方式时必须一起换，
+	// 否则会把 A 家的 Key 填到 B 家，点保存后直接 401/串号。
+	a.ui.SetField("set.key", p.APIKey)
+	a.ui.SetField("set.model", p.Model)
 	a.modelsMsg = ""
 	a.Redraw()
 }
@@ -438,16 +439,20 @@ func (a *App) settingsLookTab(p *settingsPane) {
 	verifyOn := strings.EqualFold(a.cfg.VerifyMode, "auto")
 	c.TextFace(ix, iy+4, "自动验证（改完跑测试）", ui.FsSm, 400, th.Text, ui.FaceUI)
 	if v := u.ToggleHit("set.verify", ui.R(ix, iy-4, 500, 28), ui.R(ix+170, iy, 38, 20), verifyOn); v != verifyOn {
-		if v {
-			a.cfg.VerifyMode = "auto"
+		if a.streaming || (a.eng != nil && a.eng.Running()) {
+			a.toast("生成中不能切换自动验证，先停止或等本轮结束", true)
 		} else {
-			a.cfg.VerifyMode = "off"
-		}
-		if a.eng != nil {
-			a.eng.VerifyMode = a.cfg.VerifyMode
-		}
-		if err := a.cfg.Save(); err != nil {
-			a.toast("保存失败："+err.Error(), true)
+			if v {
+				a.cfg.VerifyMode = "auto"
+			} else {
+				a.cfg.VerifyMode = "off"
+			}
+			if a.eng != nil {
+				a.eng.VerifyMode = a.cfg.VerifyMode
+			}
+			if err := a.cfg.Save(); err != nil {
+				a.toast("保存失败："+err.Error(), true)
+			}
 		}
 	}
 	c.TextFace(ix+220, iy+4, "模型准备收尾时自动构建+测试；失败把摘要回灌继续修（最多 3 轮）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
@@ -545,6 +550,11 @@ func (a *App) settingsNetTab(p *settingsPane) {
 			kind = BtnPrimary
 		}
 		if u.Button(opt.id, opt.label, ui.R(px, iy, 88, 28), kind) {
+			if a.streaming || (a.eng != nil && a.eng.Running()) {
+				a.toast("生成中不能切换代理，先停止或等本轮结束", true)
+				px += 96
+				continue
+			}
 			a.cfg.ProxyMode = opt.mode
 			if cv := a.currentConv(); cv != nil {
 				a.syncEngineTranscript(cv)
@@ -616,6 +626,12 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 
 	c.TextFace(ix, iy+4, "上下文窗口预设", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	px := ix + 120
+	curWin := a.cfg.ContextWindow
+	if s := strings.TrimSpace(a.ui.Field("set.ctxwin", "").String()); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			curWin = n
+		}
+	}
 	for _, opt := range []struct {
 		label string
 		val   int
@@ -623,11 +639,10 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 		{"auto", 0}, {"8k", 8000}, {"32k", 32000}, {"128k", 128000}, {"200k", 200000},
 	} {
 		kind := BtnGhost
-		if a.cfg.ContextWindow == opt.val {
+		if curWin == opt.val {
 			kind = BtnPrimary
 		}
 		if u.Button("set.ctx."+opt.label, opt.label, ui.R(px, iy, 58, 28), kind) {
-			a.cfg.ContextWindow = opt.val
 			a.ui.SetField("set.ctxwin", strconv.Itoa(opt.val))
 			a.Redraw()
 		}

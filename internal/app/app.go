@@ -564,6 +564,10 @@ func (a *App) setPermMode(m string) {
 		a.toast("审批策略尚未初始化", true)
 		return
 	}
+	if a.streaming || a.eng.Running() {
+		a.toast("生成中不能切换权限模式，先停止或等本轮结束", true)
+		return
+	}
 	a.eng.Policy.Mode = m
 	a.savePolicy()
 	label := map[string]string{"auto": "自动执行", "ask": "每次确认", "plan": "只读计划"}[m]

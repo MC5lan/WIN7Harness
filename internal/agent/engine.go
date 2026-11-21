@@ -407,6 +407,11 @@ func (e *Engine) loop(ctx context.Context) {
 		// 归因统计：这一段是"模型在想"，跟工具耗时分开记
 		e.recordModel(time.Since(chatStart), usage.CompletionTokens)
 		if err != nil {
+			// 出错的那次调用也产生了真实 token（尤其 reasoning-only 会烧掉
+			// 一整轮推理预算），必须计入成本与预算，否则账单系统性偏低。
+			if usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+				e.addUsage(usage)
+			}
 			if ctx.Err() != nil {
 				e.emit(Event{Kind: "status", Text: "已停止"})
 				return

@@ -573,6 +573,10 @@ func (a *App) finishOnboard() {
 /* ---------------- 设置页 ---------------- */
 
 func (a *App) saveSettings() {
+	if a.streaming || (a.eng != nil && a.eng.Running()) {
+		a.toast("生成中不能保存设置：先停止或等本轮结束", true)
+		return
+	}
 	if a.presetIdx >= 0 && a.presetIdx < len(a.cfg.Providers) {
 		a.cfg.ActiveProvider = a.presetIdx
 	}
