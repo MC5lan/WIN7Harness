@@ -102,17 +102,17 @@ flowchart LR
 
 ### 方式一：安装包（推荐）
 
-从仓库 [`release/`](release/) 下载 `WIN7Harness-v1.38.1-win7.zip`（内含安装包、双架构 exe、使用说明和 LICENSE）：
+在 [Releases](https://github.com/MC5lan/WIN7Harness/releases/latest) 页面下载 `WIN7Harness-v*-win7.zip`（内含安装包、双架构 exe、使用说明和 LICENSE）：
 
 <p align="center">
-  <a href="https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-win7.zip"><img src="https://img.shields.io/badge/下载-Win7%20整合包-E0663B?style=for-the-badge" alt="下载 Win7 整合包"></a>
-  <a href="https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-source.zip"><img src="https://img.shields.io/badge/下载-源码包-2D8C6E?style=for-the-badge" alt="下载源码包"></a>
+  <a href="https://github.com/MC5lan/WIN7Harness/releases/latest"><img src="https://img.shields.io/badge/下载-Win7%20整合包-E0663B?style=for-the-badge" alt="下载 Win7 整合包"></a>
+  <a href="https://github.com/MC5lan/WIN7Harness/releases/latest"><img src="https://img.shields.io/badge/下载-源码包-2D8C6E?style=for-the-badge" alt="下载源码包"></a>
   <a href="https://github.com/MC5lan/WIN7Harness/releases"><img src="https://img.shields.io/badge/查看-Releases-0078D6?style=for-the-badge" alt="查看 Releases"></a>
 </p>
 
-- 直接下载：<https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-win7.zip>
-- 源码包：<https://github.com/MC5lan/WIN7Harness/raw/main/release/WIN7Harness-v1.38.1-source.zip>
-- 也可以从 [Releases](https://github.com/MC5lan/WIN7Harness/releases) 页面查看版本说明
+- 最新版本：<https://github.com/MC5lan/WIN7Harness/releases/latest>
+- 源码：在 Releases 页面的 “Source code” 区域下载，或直接 `git clone`
+- [`release/`](release/) 目录不再提交构建产物
 
 解压后双击 `WIN7Harness-v1.38.1-Setup.exe`：
 

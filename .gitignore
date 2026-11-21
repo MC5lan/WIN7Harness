@@ -7,7 +7,7 @@
 *.exe
 *.syso
 *.zip
-!release/*.zip
+release/*.zip
 
 # 本地渲染/截图/评测二进制（源码仓库不提交）
 /_render/
