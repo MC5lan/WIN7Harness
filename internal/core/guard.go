@@ -209,6 +209,9 @@ func CommandRisk(cmd string) RiskLevel {
 	if destructiveBySwitches(low) {
 		return RiskDanger
 	}
+	if cautionByCommand(low) {
+		return RiskCaution
+	}
 	// 解释器直执行：至少 caution，提醒用户确认。
 	for _, p := range interpreterPatterns {
 		if strings.Contains(low, p) {
@@ -289,22 +292,7 @@ func trimFloat(v float64) string {
 // 再看开关里有没有对应的破坏性标志，与书写顺序无关。
 // 入参 low 已经过 normalizeCmd（小写、去引号、空白归一）。
 func destructiveBySwitches(low string) bool {
-	for _, seg := range splitCmdSegments(low) {
-		f := strings.Fields(seg)
-		// cmd /c rd /q /s x：剥掉外层 cmd 再看真正的命令。
-		for len(f) >= 2 && cmdBase(f[0]) == "cmd" {
-			i := 1
-			for i < len(f) && strings.HasPrefix(f[i], "/") && f[i] != "/c" && f[i] != "/k" {
-				i++
-			}
-			if i >= len(f) {
-				break
-			}
-			f = f[i+1:]
-		}
-		if len(f) == 0 {
-			continue
-		}
+	for _, f := range cmdSegments(low) {
 		args := f[1:]
 		switch cmdBase(f[0]) {
 		case "rd", "rmdir":
@@ -321,6 +309,110 @@ func destructiveBySwitches(low string) bool {
 			if hasDashFlag(args, 'r', "--recursive") && hasDashFlag(args, 'f', "--force") {
 				return true
 			}
+		case "git":
+			if gitDiscardsWork(args) {
+				return true
+			}
+		case "wevtutil":
+			// wevtutil cl System：清空事件日志，事后无法追查。
+			if len(args) > 0 && (args[0] == "cl" || args[0] == "clear-log") {
+				return true
+			}
+		case "sc":
+			// sc [\\server] delete <服务>：删除系统服务。
+			if hasArg(args, "delete") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cautionByCommand 识别本身不删数据、但会下载执行或留下持久化的系统命令，
+// 抬到 caution 让用户确认。这些命令不在 interpreterPatterns 里，此前判为 safe。
+func cautionByCommand(low string) bool {
+	for _, f := range cmdSegments(low) {
+		args := f[1:]
+		switch cmdBase(f[0]) {
+		case "bitsadmin":
+			// Win7 自带的下载器：bitsadmin /transfer 下载后常紧跟着运行。
+			if hasArg(args, "/transfer") || hasArg(args, "/addfile") || hasArg(args, "/create") {
+				return true
+			}
+		case "schtasks":
+			// 计划任务：普通用户即可创建开机/登录自启。
+			if hasArg(args, "/create") || hasArg(args, "/change") || hasArg(args, "/delete") {
+				return true
+			}
+		case "sc":
+			if hasArg(args, "config") || hasArg(args, "create") || hasArg(args, "stop") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// gitDiscardsWork 判断 git 子命令是否会丢弃未提交的改动或删除未跟踪文件，
+// 这类操作没有 git 层面的撤销手段。args 是 git 之后的参数（已小写）。
+func gitDiscardsWork(args []string) bool {
+	// 跳过全局选项：-c k=v、-C <dir>（normalizeCmd 已统一小写，二者都带一个值）、--no-pager 等。
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		if args[i] == "-c" {
+			i++
+		}
+		i++
+	}
+	if i >= len(args) {
+		return false
+	}
+	sub, rest := args[i], args[i+1:]
+	switch sub {
+	case "clean":
+		// git clean 默认要求 -f；-n / --dry-run 只是预览。
+		return hasDashFlag(rest, 'f', "--force") && !hasDashFlag(rest, 'n', "--dry-run")
+	case "reset":
+		return hasArg(rest, "--hard")
+	case "checkout":
+		// git checkout -- <路径> / git checkout . / -f：用索引覆盖工作区改动。
+		return hasArg(rest, "--") || hasArg(rest, ".") || hasArg(rest, "-f") || hasArg(rest, "--force")
+	case "restore":
+		// 只有 --staged 而没有 --worktree 时只动暂存区，不丢改动。
+		return len(rest) > 0 && !(hasArg(rest, "--staged") && !hasArg(rest, "--worktree"))
+	case "stash":
+		return len(rest) > 0 && (rest[0] == "clear" || rest[0] == "drop")
+	}
+	return false
+}
+
+// cmdSegments 按 && || & | ; 切段，剥掉外层 cmd /c，返回每段的字段（至少一个）。
+func cmdSegments(low string) [][]string {
+	var out [][]string
+	for _, seg := range splitCmdSegments(low) {
+		f := strings.Fields(seg)
+		// cmd /c rd /q /s x：剥掉外层 cmd 再看真正的命令。
+		for len(f) >= 2 && cmdBase(f[0]) == "cmd" {
+			i := 1
+			for i < len(f) && strings.HasPrefix(f[i], "/") && f[i] != "/c" && f[i] != "/k" {
+				i++
+			}
+			if i >= len(f) {
+				break
+			}
+			f = f[i+1:]
+		}
+		if len(f) > 0 {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
 		}
 	}
 	return false
