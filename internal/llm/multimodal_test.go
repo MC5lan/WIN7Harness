@@ -83,6 +83,17 @@ func TestMessageToolFieldsPreserved(t *testing.T) {
 	}
 }
 
+func TestMessageJSONOmitsReasoning(t *testing.T) {
+	m := Message{Role: "assistant", Content: "结论", Reasoning: "很长的思考过程"}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "reasoning_content") || strings.Contains(string(b), "思考过程") {
+		t.Fatalf("reasoning_content 不应再发回模型：%s", string(b))
+	}
+}
+
 func TestMessageJSONPromptCache(t *testing.T) {
 	m := Message{Role: "system", Content: "稳定前缀", Cache: true}
 	b, err := json.Marshal(m)

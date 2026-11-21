@@ -63,7 +63,8 @@ func estimateChars(msgs []llm.Message) int {
 // 此前完全不计 Parts，多图长会话会低估上下文几个数量级，
 // 该压缩时压不动，或每轮带着几百 KB 请求体硬塞进 32 位地址空间。
 func messageSize(m *llm.Message) int {
-	l := len(m.Content) + len(m.Reasoning) + 40
+	// Reasoning 只保留在本地 UI，不会发回模型，也不计入上下文预算。
+	l := len(m.Content) + 40
 	for _, tc := range m.ToolCalls {
 		l += len(tc.Function.Arguments) + 20
 	}

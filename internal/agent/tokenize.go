@@ -49,7 +49,8 @@ func estimateTokens(s string) int {
 
 // estimateMessageTokens 估算一条消息的 token 成本（含工具参数与多模态文本）。
 func estimateMessageTokens(m *llm.Message) int {
-	n := estimateTokens(m.Content) + estimateTokens(m.Reasoning) + 8
+	// Reasoning 不进入后续请求（见 llm.Message.MarshalJSON），也不计预算。
+	n := estimateTokens(m.Content) + 8
 	for _, tc := range m.ToolCalls {
 		n += estimateTokens(tc.Function.Arguments) + 6
 	}

@@ -70,8 +70,12 @@ type wireMessage struct {
 // 这样老服务端/纯文本模型看到的请求体与 v1.7 完全一致，不会因为多模态改动而回归。
 func (m Message) MarshalJSON() ([]byte, error) {
 	w := wireMessage{
-		Role:       m.Role,
-		Reasoning:  m.Reasoning,
+		Role: m.Role,
+		// 不把上一轮的 reasoning_content 再发回模型：
+		// DeepSeek 等推理模型会把它当成“自己还要继续想”的信号，长任务里可能
+		// 每轮重新生成几万字思考、正文为空，上下文越滚越大。Reasoning 只留在
+		// 本地 UI/会话展示，不进入请求体，也不进上下文预算。
+		Reasoning:  "",
 		Name:       m.Name,
 		ToolCalls:  m.ToolCalls,
 		ToolCallID: m.ToolCallID,

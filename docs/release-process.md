@@ -11,7 +11,7 @@
 只改一处：`internal/core/config.go` 的
 
 ```go
-const Version = "1.39.0"
+const Version = "1.39.1"
 ```
 
 `build.sh`、Release workflow 与 `-version` 输出都从这一行提取。不要改成
@@ -36,8 +36,8 @@ powershell -ExecutionPolicy Bypass -File scripts\installer_regression.ps1
 ## 3. 打 tag
 
 ```bash
-git tag v1.39.0
-git push origin v1.39.0
+git tag v1.39.1
+git push origin v1.39.1
 ```
 
 tag 必须与 `const Version` 完全一致，否则 workflow 第一步就会失败。

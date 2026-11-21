@@ -104,6 +104,34 @@ func TestChatNoResumeWithoutContent(t *testing.T) {
 	}
 }
 
+// 只返回 reasoning_content、没有正文时，不应按“空响应”重试：
+// 重试会把输出预算再次烧在思考上（实测一次 3.7 万字符思考后正文为空）。
+func TestChatReasoningOnlyDoesNotRetry(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte(`data: {"choices":[{"delta":{"reasoning_content":"先想很久"}}]}` + "\n\n"))
+		w.Write([]byte(`data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":20,"total_tokens":30}}` + "\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL+"/v1", "k", "m", 5*time.Second)
+	var reasoning strings.Builder
+	_, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "hi"}}, nil, 0.3, 128,
+		Handlers{OnReasoning: func(s string) { reasoning.WriteString(s) }})
+	if err == nil || !strings.Contains(err.Error(), "思考过程") {
+		t.Fatalf("应返回 reasoning-only 错误，实际：%v", err)
+	}
+	if n := atomic.LoadInt32(&calls); n != 1 {
+		t.Fatalf("reasoning-only 不应重试，实际请求 %d 次", n)
+	}
+	if reasoning.String() != "先想很久" {
+		t.Fatalf("思考过程应保留给界面：%q", reasoning.String())
+	}
+}
+
 func TestCanResumeRules(t *testing.T) {
 	if canResume(context.Background(), context.Canceled, "有内容") {
 		t.Fatal("用户取消不应续写")

@@ -297,8 +297,17 @@ func (e *Engine) History() []llm.Message {
 // LoadHistory 用结构化轨迹恢复会话（含 tool_calls/tool 结果）。
 // 与 Reset + 逐条追加文本相比，它保留了“改过哪些文件、跑过什么命令”的上下文。
 func (e *Engine) LoadHistory(msgs []llm.Message) {
+	out := make([]llm.Message, 0, len(msgs))
+	for _, m := range msgs {
+		// 旧版本可能把“只有 reasoning、没有正文/工具”的失败轮次写进历史；
+		// 这类消息对后续请求没有价值，还可能诱导模型继续只思考，加载时丢弃。
+		if m.Role == "assistant" && strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0 {
+			continue
+		}
+		out = append(out, m)
+	}
 	e.mu.Lock()
-	e.Messages = append([]llm.Message(nil), msgs...)
+	e.Messages = out
 	e.mu.Unlock()
 }
 
@@ -407,11 +416,12 @@ func (e *Engine) loop(ctx context.Context) {
 				msg += visionHint(err)
 			}
 			e.emit(Event{Kind: "error", Text: msg, Err: true})
-			// 把已生成内容保留下来，避免用户丢失
-			if content.Len() > 0 || reasoning.Len() > 0 {
+			// 把已生成正文保留下来，避免用户丢失；reasoning-only 不写回历史：
+			// 它已经通过事件显示在界面上，回灌只会让下一轮继续“只思考不回答”。
+			if content.Len() > 0 {
 				e.mu.Lock()
 				e.Messages = append(e.Messages, llm.Message{
-					Role: "assistant", Content: content.String(), Reasoning: reasoning.String(),
+					Role: "assistant", Content: content.String(),
 				})
 				e.mu.Unlock()
 			}

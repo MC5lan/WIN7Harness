@@ -30,19 +30,29 @@ const resumeNotice = "（说明：上一条回复在网络中断处被截断了�
 // errNoResume 表示本次失败不适合续写。
 var errNoResume = errors.New("no resume")
 
+// errReasoningOnly 表示模型只输出了 reasoning_content，没有正文或工具调用。
+// 这类响应重试通常会再次把输出预算烧在思考上，不能按“空响应”盲目重试。
+var errReasoningOnly = errors.New("模型只返回了思考过程（reasoning_content），没有生成正文或工具调用。" +
+	"通常是最大输出 token 被推理占满，或该模型/网关要求关闭思考；" +
+	"请调大“最大输出 token”、缩短上下文、换模型，或在该端点支持的参数里关闭 thinking 后重试")
+
 // ChatWithResume 在 Chat 的基础上加一次断线续写。
 // 返回的 usage 为两次请求的累加。
 func (c *Client) ChatWithResume(ctx context.Context, msgs []Message, tools []ToolDef,
 	temp float64, maxTokens int, h Handlers) (Usage, error) {
 
-	usage, content, hasTool, err := c.chatOnce(ctx, msgs, tools, temp, maxTokens, h)
+	usage, content, reasoning, hasTool, err := c.chatOnceWithReasoning(ctx, msgs, tools, temp, maxTokens, h)
 	if err == nil {
 		if strings.TrimSpace(content) != "" || hasTool {
 			return usage, nil
 		}
-		// 空响应：连接正常但模型一个字都没吐（网关抽风、上下文被裁剪到只剩空壳等）。
+		if strings.TrimSpace(reasoning) != "" {
+			// 有思考、无正文：不要重试，否则会再次消耗一整轮推理预算。
+			return usage, errReasoningOnly
+		}
+		// 真空响应：连接正常但模型一个字都没吐（网关抽风、上下文被裁剪到只剩空壳等）。
 		// 直接重试一次比把空回复返回给用户强，但要限次，别把 40 秒的超时重成 4 分钟。
-		u2, c2, ht2, err2 := c.chatOnce(ctx, msgs, tools, temp, maxTokens, h)
+		u2, c2, r2, ht2, err2 := c.chatOnceWithReasoning(ctx, msgs, tools, temp, maxTokens, h)
 		usage.PromptTokens += u2.PromptTokens
 		usage.CompletionTokens += u2.CompletionTokens
 		usage.TotalTokens += u2.TotalTokens
@@ -50,6 +60,9 @@ func (c *Client) ChatWithResume(ctx context.Context, msgs []Message, tools []Too
 			return usage, err2
 		}
 		if strings.TrimSpace(c2) == "" && !ht2 {
+			if strings.TrimSpace(r2) != "" {
+				return usage, errReasoningOnly
+			}
 			return usage, errors.New("模型连续两次返回空响应（无正文也无工具调用），请检查模型名、上下文长度或稍后重试")
 		}
 		return usage, nil
@@ -67,7 +80,7 @@ func (c *Client) ChatWithResume(ctx context.Context, msgs []Message, tools []Too
 		Message{Role: "user", Content: resumeNotice},
 	)
 
-	u2, _, _, err2 := c.chatOnce(ctx, resumeMsgs, tools, temp, maxTokens, h)
+	u2, _, _, _, err2 := c.chatOnceWithReasoning(ctx, resumeMsgs, tools, temp, maxTokens, h)
 	usage.PromptTokens += u2.PromptTokens
 	usage.CompletionTokens += u2.CompletionTokens
 	usage.TotalTokens += u2.TotalTokens
@@ -75,6 +88,23 @@ func (c *Client) ChatWithResume(ctx context.Context, msgs []Message, tools []Too
 		return usage, fmt.Errorf("网络中断后已自动续写仍失败：%v", err2)
 	}
 	return usage, nil
+}
+
+// chatOnceWithReasoning 包一层 chatOnce，收集 reasoning_content 但保留原回调。
+// 上层需要区分“真空响应”和“只思考没正文”，否则会把推理预算重复烧掉。
+func (c *Client) chatOnceWithReasoning(ctx context.Context, msgs []Message, tools []ToolDef,
+	temp float64, maxTokens int, h Handlers) (Usage, string, string, bool, error) {
+	var rb strings.Builder
+	h2 := h
+	orig := h.OnReasoning
+	h2.OnReasoning = func(s string) {
+		rb.WriteString(s)
+		if orig != nil {
+			orig(s)
+		}
+	}
+	u, content, hasTool, err := c.chatOnce(ctx, msgs, tools, temp, maxTokens, h2)
+	return u, content, rb.String(), hasTool, err
 }
 
 // canResume 判断这次失败是否值得续写。
