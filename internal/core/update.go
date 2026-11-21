@@ -52,7 +52,9 @@ var UpdatePublicKey string
 var updateKeyWarnOnce sync.Once
 
 // DefaultManifestURL 默认清单地址（可在配置里覆盖）。
-const DefaultManifestURL = "https://raw.githubusercontent.com/win7harness/releases/main/latest.json"
+// 指向本仓库 Release 的固定 asset 链接：latest 会随最新 Release 滚动，
+// 且 github.com 的连通性优于 raw.githubusercontent.com。
+const DefaultManifestURL = "https://github.com/MC5lan/WIN7Harness/releases/latest/download/latest.json"
 
 // canonicalManifestPayload 只序列化被签名保护的字段：
 // 版本、说明、页面、发布时间与各架构文件（URL/SHA256/大小）。
