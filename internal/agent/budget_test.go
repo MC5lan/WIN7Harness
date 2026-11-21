@@ -1,6 +1,10 @@
 package agent
 
-import "testing"
+import (
+	"testing"
+
+	"win7harness/internal/llm"
+)
 
 func TestCalcBudgetNoLimit(t *testing.T) {
 	bs := calcBudget(1000, 500, 2, 1.0, 2.0, 0, 0, true)
@@ -34,6 +38,20 @@ func TestCalcBudgetTokenWarnThenExceed(t *testing.T) {
 	over := calcBudget(1000, 0, 1, 0, 0, 0, 1000, true)
 	if !over.Exceeded {
 		t.Fatalf("100%% 应超限: %+v", over)
+	}
+}
+
+func TestEngineBudgetUsesSnapshot(t *testing.T) {
+	e := &Engine{PriceIn: 10, PriceOut: 20}
+	e.SetBudgetLimits(5, 1000, true)
+	e.addUsage(llm.Usage{PromptTokens: 850, CompletionTokens: 50, TotalTokens: 900})
+	bs := e.Budget()
+	if bs.LimitCost != 5 || bs.LimitTokens != 1000 || !bs.Warn {
+		t.Fatalf("预算快照未生效：%+v", bs)
+	}
+	e.SetBudgetLimits(0, 0, false)
+	if bs = e.Budget(); bs.LimitCost != 0 || bs.LimitTokens != 0 {
+		t.Fatalf("预算关闭未生效：%+v", bs)
 	}
 }
 

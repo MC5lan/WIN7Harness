@@ -477,6 +477,9 @@ func (a *App) slashBudget(rest string) bool {
 		a.toast("保存失败："+err.Error(), true)
 		return true
 	}
+	if a.eng != nil {
+		a.eng.SetBudgetLimits(a.cfg.MaxCost, a.cfg.BudgetTokens, a.cfg.BudgetWarn)
+	}
 	a.ui.SetField("set.maxcost", fmt.Sprintf("%g", a.cfg.MaxCost))
 	a.ui.SetField("set.budget", fmt.Sprintf("%d", a.cfg.BudgetTokens))
 	return true

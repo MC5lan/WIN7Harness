@@ -75,6 +75,7 @@ func (e *Engine) spawnSubWithDef(def *core.AgentDef, prompt, desc string, readOn
 	sub := New(e.Client.WithModel(subModel), subModel, e.WorkDir)
 	sub.Temp = e.Temp
 	sub.MaxTok = e.MaxTok
+	sub.UserInstructions = e.UserInstructions
 	sub.Confirm = e.Confirm
 	sub.ConfirmDiff = e.ConfirmDiff
 	sub.PlanMode = e.PlanMode || readOnly

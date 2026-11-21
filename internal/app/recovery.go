@@ -139,6 +139,10 @@ func (a *App) cmdVerify(rest string) {
 	if a.cfg == nil {
 		return
 	}
+	if arg != "" && (a.streaming || (a.eng != nil && a.eng.Running())) {
+		a.toast("生成中不能切换自动验证，先停止或等本轮结束", true)
+		return
+	}
 	switch arg {
 	case "":
 		if a.eng != nil && a.eng.VerifyEnabled() {

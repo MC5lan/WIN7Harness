@@ -322,6 +322,7 @@ func (e *Engine) SpawnBatch(tasks []tools.BatchTask) (string, error) {
 				sub := New(e.Client.WithModel(subModel), subModel, dir)
 				sub.Temp = e.Temp
 				sub.MaxTok = e.MaxTok
+				sub.UserInstructions = e.UserInstructions
 				sub.Confirm = e.Confirm
 				sub.ConfirmDiff = e.ConfirmDiff
 				sub.PlanMode = e.PlanMode

@@ -146,6 +146,10 @@ func NewEngineFor(cfg *core.Config, p core.Provider, model, workDir string, opt 
 	e.MaxTok = cfg.MaxTokens
 	e.PriceIn = cfg.PriceIn
 	e.PriceOut = cfg.PriceOut
+	e.UserInstructions = cfg.SystemPrompt
+	e.MaxCost = cfg.MaxCost
+	e.BudgetTokens = cfg.BudgetTokens
+	e.BudgetWarn = cfg.BudgetWarn
 	e.MaxSubTasks = cfg.MaxSubTasks
 	// 0 = 不限制轮数（默认）；>0 时撞顶会暂停询问而不是直接失败。
 	e.MaxToolRounds = cfg.MaxToolRounds

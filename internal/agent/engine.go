@@ -45,6 +45,12 @@ type Engine struct {
 	PriceOut float64
 	// PlanMode 计划模式：只允许只读工具，任何写盘/执行类操作一律拒绝。
 	PlanMode bool
+	// UserInstructions 是用户全局指令的快照；引擎不再每轮从全局 Config 读取。
+	UserInstructions string
+	// 预算护栏快照。引擎每轮只读这些字段，避免 UI 保存设置时与 Agent 并发读写 Config。
+	MaxCost      float64
+	BudgetTokens int
+	BudgetWarn   bool
 	// MaxSubTasks 批量派发子任务的上限，0 表示用默认值（3）。
 	MaxSubTasks int
 	// VerifyMode 自动验证开关：off / auto，空值时读环境变量 W7H_VERIFY。
@@ -858,13 +864,14 @@ func (e *Engine) buildPromptPlan() PromptPlan { return e.buildPromptPlanWith(fal
 func (e *Engine) buildPromptPlanWith(minimal bool) PromptPlan {
 	name, body := e.activeSkillState()
 	opt := PromptOptions{
-		PlanMode:        e.PlanMode,
-		SystemExtra:     e.SystemExtra,
-		ActiveSkillName: name,
-		ActiveSkillBody: body,
-		Query:           e.lastUserQuery(),
-		ContextWindow:   e.contextWindow(),
-		Minimal:         minimal,
+		PlanMode:         e.PlanMode,
+		SystemExtra:      e.SystemExtra,
+		ActiveSkillName:  name,
+		ActiveSkillBody:  body,
+		Query:            e.lastUserQuery(),
+		ContextWindow:    e.contextWindow(),
+		Minimal:          minimal,
+		UserInstructions: e.UserInstructions,
 	}
 	if e.toolAllow != nil {
 		opt.AllowedTools = e.allowedToolList()

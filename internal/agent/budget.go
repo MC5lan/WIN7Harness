@@ -69,20 +69,11 @@ func (e *Engine) Budget() BudgetState {
 	fin, fout, ft := e.fastTokIn, e.fastTokOut, e.fastTurns
 	sin, sout, st := e.subTokIn, e.subTokOut, e.subTurns
 	sfi, sfo := e.subFastTokIn, e.subFastTokOut
+	// 读引擎自己的配置快照：UI 保存设置时不会与 Agent 并发读写 Config。
+	priceIn, priceOut := e.PriceIn, e.PriceOut
+	limitCost, limitTok := e.MaxCost, e.BudgetTokens
+	warn := e.BudgetWarn
 	e.usageMu.Unlock()
-
-	var cfg *core.Config
-	if c := core.Get(); c != nil {
-		cfg = c
-	}
-	var priceIn, priceOut float64
-	var limitCost float64
-	var limitTok int
-	warn := true
-	if cfg != nil {
-		priceIn, priceOut = cfg.PriceIn, cfg.PriceOut
-		limitCost, limitTok, warn = cfg.MaxCost, cfg.BudgetTokens, cfg.BudgetWarn
-	}
 
 	// 主对话（沿用原语义，priceIn/priceOut 为主模型单价）
 	bs := calcBudget(in, out, turns, priceIn, priceOut, limitCost, limitTok, warn)
@@ -113,6 +104,16 @@ func (e *Engine) Budget() BudgetState {
 	bs.CostUSD += fastCost + subCost
 	applyLimit(&bs, limitCost, limitTok, warn)
 	return bs
+}
+
+// SetBudgetLimits 更新引擎的预算快照（/budget 命令用）。
+// 与 Budget 共用 usageMu，避免运行中改限额的读写竞争。
+func (e *Engine) SetBudgetLimits(limitCost float64, limitTokens int, warn bool) {
+	e.usageMu.Lock()
+	e.MaxCost = limitCost
+	e.BudgetTokens = limitTokens
+	e.BudgetWarn = warn
+	e.usageMu.Unlock()
 }
 
 // CheckBudget 在每轮模型调用后调用，返回是否应停止本轮循环。

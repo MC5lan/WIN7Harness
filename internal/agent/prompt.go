@@ -50,6 +50,8 @@ type PromptOptions struct {
 	// Minimal 用于系统提示+工具定义已经超预算时：暂时省略项目文档、技能索引和记忆，
 	// 先保证当前任务与安全规则能发出去；/context 会显示实际注入分段。
 	Minimal bool
+	// UserInstructions 是用户全局指令快照，避免每轮读全局 Config。
+	UserInstructions string
 }
 
 const (
@@ -104,14 +106,8 @@ func buildPromptPlan(workDir string, opt PromptOptions) PromptPlan {
 	// S1 运行环境红线：按宿主 Win7 / Win10-11 二选一，同一会话稳定。
 	add("runtime", "运行环境红线", runtimePromptFor(isWin7Host()), "system", true, 0)
 
-	// S2 用户全局指令：用户手写，变化频率低，但优先于项目约定。
-	var cfg *core.Config
-	if c := core.Get(); c != nil {
-		cfg = c
-	}
-	if cfg != nil {
-		add("user", "用户全局指令", userInstructionBlock(cfg.SystemPrompt), "user", true, userBudget)
-	}
+	// S2 用户全局指令：来自引擎创建时的配置快照，不在每轮读全局 Config。
+	add("user", "用户全局指令", userInstructionBlock(opt.UserInstructions), "user", true, userBudget)
 
 	// S3-S5 是可裁剪的项目资料：系统提示+工具已经超预算时优先省略，
 	// 保证安全规则和当前任务仍然发得出去。

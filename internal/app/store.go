@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -466,7 +467,13 @@ func (a *App) syncEngineTranscript(cv *Conv) {
 	if cv == nil || a.eng == nil {
 		return
 	}
-	cv.EngineMsgs = pruneEngineMsgs(a.eng.History(), 240, 1<<20)
+	maxBytes := 1 << 20
+	// 64 位进程在大窗口下保留更长的结构化轨迹；32 位仍守 1MB，避免会话
+	// 序列化和内存复制把地址空间打爆。
+	if strconv.IntSize == 64 && a.cfg != nil && a.cfg.ContextWindow >= 300000 {
+		maxBytes = 2 << 20
+	}
+	cv.EngineMsgs = pruneEngineMsgs(a.eng.History(), 320, maxBytes)
 }
 
 // pruneEngineMsgs 保留最近 N 条/约 1MB 的结构化消息，并把图片 data URL 去掉。
