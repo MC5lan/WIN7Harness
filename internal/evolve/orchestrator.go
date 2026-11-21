@@ -13,6 +13,48 @@ import (
 
 // Run 执行一轮自迭代。Stage 0 默认只把候选合入影子分支（TargetBranch），
 // 不直接动 BaseBranch；合并目标由调用方通过 TargetBranch 决定。
+type runState struct {
+	ctx        context.Context
+	cfg        Config
+	start      time.Time
+	runID      string
+	repo       string
+	workRoot   string
+	outDir     string
+	rep        *RunReport
+	logBuf     strings.Builder
+	targetDir  string
+	keepTarget bool
+	baseEval   eval.Report
+	tokens     int
+	propose    func() (ProposeResult, error)
+}
+
+func (s *runState) logf(format string, args ...interface{}) {
+	line := fmt.Sprintf(format, args...)
+	s.logBuf.WriteString(line + "\n")
+	if s.cfg.Logf != nil {
+		s.cfg.Logf("%s", line)
+	}
+}
+
+func (s *runState) save() {
+	s.rep.EndedAt = s.cfg.now().Format(time.RFC3339)
+	s.rep.DurationMs = s.cfg.now().Sub(s.start).Milliseconds()
+	if err := SaveRun(s.outDir, s.rep); err != nil {
+		s.logf("写报告失败：%v", err)
+	}
+	_ = os.WriteFile(filepath.Join(s.outDir, "run.log"), []byte(s.logBuf.String()), 0o644)
+}
+
+func (s *runState) fail(stop string, err error) (*RunReport, error) {
+	s.rep.Stop = stop
+	s.rep.StopDetail = err.Error()
+	s.logf("停止：%s（%v）", stop, err)
+	s.save()
+	return s.rep, err
+}
+
 func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -39,6 +81,13 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		return nil, fmt.Errorf("创建报告目录失败：%w", err)
 	}
 
+	s := &runState{ctx: ctx, cfg: cfg, start: start, runID: runID, repo: repo, workRoot: workRoot, outDir: outDir}
+	// 工作树清理放在 Run 的 defer 里：preflight 返回时不能删，否则后续阶段没有工作树可用。
+	defer func() {
+		if s.targetDir != "" && !s.keepTarget {
+			removeWorktree(ctx, repo, s.targetDir)
+		}
+	}()
 	rep := &RunReport{
 		ID:           runID,
 		StartedAt:    start.Format(time.RFC3339),
@@ -47,156 +96,144 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		TargetBranch: cfg.TargetBranch,
 		DryRun:       cfg.DryRun,
 	}
-	var logBuf strings.Builder
-	logf := func(format string, args ...interface{}) {
-		line := fmt.Sprintf(format, args...)
-		logBuf.WriteString(line + "\n")
-		if cfg.Logf != nil {
-			cfg.Logf("%s", line)
-		}
-	}
-	save := func() {
-		rep.EndedAt = cfg.now().Format(time.RFC3339)
-		rep.DurationMs = cfg.now().Sub(start).Milliseconds()
-		if err := SaveRun(outDir, rep); err != nil {
-			logf("写报告失败：%v", err)
-		}
-		_ = os.WriteFile(filepath.Join(outDir, "run.log"), []byte(logBuf.String()), 0o644)
-	}
-	fail := func(stop string, err error) (*RunReport, error) {
-		rep.Stop = stop
-		rep.StopDetail = err.Error()
-		logf("停止：%s（%v）", stop, err)
-		save()
+	s.rep = rep
+	rep, err := s.preflight()
+	if err != nil {
 		return rep, err
 	}
-
-	if !isGitRepo(ctx, repo) {
-		return fail("preflight-error", fmt.Errorf("%s 不是 git 仓库", repo))
+	if s.cfg.DryRun {
+		return s.runDryRun()
 	}
-	if !cfg.AllowDirty {
-		st, err := statusPorcelain(ctx, repo)
+	return s.runCandidates()
+}
+
+// preflight 完成 git 与工作树检查。
+func (s *runState) preflight() (*RunReport, error) {
+	if !isGitRepo(s.ctx, s.repo) {
+		return s.fail("preflight-error", fmt.Errorf("%s 不是 git 仓库", s.repo))
+	}
+	if !s.cfg.AllowDirty {
+		st, err := statusPorcelain(s.ctx, s.repo)
 		if err != nil {
-			return fail("preflight-error", err)
+			return s.fail("preflight-error", err)
 		}
 		if strings.TrimSpace(st) != "" {
-			return fail("preflight-error", fmt.Errorf("主工作区有未提交改动，先收口再开自迭代：\n%s", clip(st, 800)))
+			return s.fail("preflight-error", fmt.Errorf("主工作区有未提交改动，先收口再开自迭代：\n%s", clip(st, 800)))
 		}
 	}
-	if err := ensureBranch(ctx, repo, cfg.TargetBranch, cfg.BaseBranch); err != nil {
-		return fail("preflight-error", err)
+	if err := ensureBranch(s.ctx, s.repo, s.cfg.TargetBranch, s.cfg.BaseBranch); err != nil {
+		return s.fail("preflight-error", err)
 	}
-	targetDir, err := prepareWorktree(ctx, repo, workRoot, "target", cfg.TargetBranch, false, "")
+	targetDir, err := prepareWorktree(s.ctx, s.repo, s.workRoot, "target", s.cfg.TargetBranch, false, "")
 	if err != nil {
-		return fail("preflight-error", err)
+		return s.fail("preflight-error", err)
 	}
-	keepTarget := false
-	defer func() {
-		if !keepTarget {
-			removeWorktree(ctx, repo, targetDir)
-		}
-	}()
+	s.targetDir = targetDir
 
-	logf("=== evolve %s ===", runID)
-	logf("repo=%s", repo)
-	logf("base=%s target=%s", cfg.BaseBranch, cfg.TargetBranch)
-	if err := updateTarget(ctx, targetDir, cfg.BaseBranch); err != nil {
-		return fail("preflight-error", err)
+	s.logf("=== evolve %s ===", s.runID)
+	s.logf("repo=%s", s.repo)
+	s.logf("base=%s target=%s", s.cfg.BaseBranch, s.cfg.TargetBranch)
+	if err := updateTarget(s.ctx, s.targetDir, s.cfg.BaseBranch); err != nil {
+		return s.fail("preflight-error", err)
 	}
 
-	var baseEval eval.Report
-	if cfg.Eval != nil {
-		baseEval, err = cfg.Eval(ctx, targetDir)
+	if s.cfg.Eval != nil {
+		s.baseEval, err = s.cfg.Eval(s.ctx, s.targetDir)
 		if err != nil {
-			if !cfg.DryRun {
-				return fail("preflight-error", fmt.Errorf("基线评测失败：%w", err))
+			if !s.cfg.DryRun {
+				return s.fail("preflight-error", fmt.Errorf("基线评测失败：%w", err))
 			}
-			logf("基线评测失败（dry-run 忽略）：%v", err)
+			s.logf("基线评测失败（dry-run 忽略）：%v", err)
 		} else {
-			rep.BaseEval = baseEval
-			logf("基线评测：通过 %d / 失败 %d / 跳过 %d", baseEval.Pass, baseEval.Fail, baseEval.Skip)
+			s.rep.BaseEval = s.baseEval
+			s.logf("基线评测：通过 %d / 失败 %d / 跳过 %d", s.baseEval.Pass, s.baseEval.Fail, s.baseEval.Skip)
 		}
 	}
 
-	signals := CollectSignals(ctx, targetDir)
-	history := LoadHistory(repo, 20)
+	signals := CollectSignals(s.ctx, s.targetDir)
+	history := LoadHistory(s.repo, 20)
 	if len(signals) == 0 {
 		signals = append(signals, "没有显式信号；请从代码质量、测试覆盖或已知小问题里找低风险改进。")
 	}
 
-	propose := func() (ProposeResult, error) {
-		return cfg.Propose(ctx, ProposeInput{
-			Repo:    repo,
-			BaseDir: targetDir,
-			Goal:    cfg.Goal,
+	s.propose = func() (ProposeResult, error) {
+		return s.cfg.Propose(s.ctx, ProposeInput{
+			Repo:    s.repo,
+			BaseDir: s.targetDir,
+			Goal:    s.cfg.Goal,
 			Signals: signals,
 			History: history,
 		})
 	}
-	tokens := 0
+	s.tokens = 0
+	return nil, nil
+}
 
-	if cfg.DryRun {
-		pr, err := propose()
-		if err != nil {
-			return fail("propose-error", err)
-		}
-		tokens += pr.Tokens
-		rep.Tokens = tokens
-		rep.Proposals = pr.Proposals
-		rep.Stop = "dry-run"
-		logf("dry-run：收到 %d 个提案，不执行", len(pr.Proposals))
-		for i, p := range pr.Proposals {
-			logf("  [%d] [%s] %s", i+1, p.Risk, p.Title)
-		}
-		save()
-		return rep, nil
+// runDryRun 只生成提案，不执行。
+func (s *runState) runDryRun() (*RunReport, error) {
+	pr, err := s.propose()
+	if err != nil {
+		return s.fail("propose-error", err)
 	}
+	s.tokens += pr.Tokens
+	s.rep.Tokens = s.tokens
+	s.rep.Proposals = pr.Proposals
+	s.rep.Stop = "dry-run"
+	s.logf("dry-run：收到 %d 个提案，不执行", len(pr.Proposals))
+	for i, p := range pr.Proposals {
+		s.logf("  [%d] [%s] %s", i+1, p.Risk, p.Title)
+	}
+	s.save()
+	return s.rep, nil
+}
 
+// runCandidates 执行候选的提案、实现、门禁、合并循环。
+func (s *runState) runCandidates() (*RunReport, error) {
 	consecutiveFailures := 0
 	seen := map[string]bool{}
 	stop := ""
 	stopDetail := ""
 	record := func(exp Experiment) {
-		rep.Experiments = append(rep.Experiments, exp)
-		if err := AppendHistory(repo, exp); err != nil {
-			logf("写实验历史失败：%v", err)
+		s.rep.Experiments = append(s.rep.Experiments, exp)
+		if err := AppendHistory(s.repo, exp); err != nil {
+			s.logf("写实验历史失败：%v", err)
 		}
-		save()
+		s.save()
 	}
 	failed := func(exp *Experiment, status, reason string) {
 		exp.Status = status
 		exp.Reason = reason
-		exp.EndedAt = cfg.now().Format(time.RFC3339)
+		exp.EndedAt = s.cfg.now().Format(time.RFC3339)
 		consecutiveFailures++
-		logf("[%s] %s：%s", exp.ID, status, clip(reason, 300))
+		s.logf("[%s] %s：%s", exp.ID, status, clip(reason, 300))
 	}
 
-	for i := 0; i < cfg.MaxCandidates; i++ {
-		if ctx.Err() != nil {
-			stop, stopDetail = "cancelled", ctx.Err().Error()
+	for i := 0; i < s.cfg.MaxCandidates; i++ {
+		if s.ctx.Err() != nil {
+			stop, stopDetail = "cancelled", s.ctx.Err().Error()
 			break
 		}
-		if cfg.MaxWallClock > 0 && cfg.now().Sub(start) >= cfg.MaxWallClock {
+		if s.cfg.MaxWallClock > 0 && s.cfg.now().Sub(s.start) >= s.cfg.MaxWallClock {
 			stop, stopDetail = "max-wall-clock", "达到本轮时间上限"
 			break
 		}
-		if cfg.MaxTokens > 0 && tokens >= cfg.MaxTokens {
-			stop, stopDetail = "max-tokens", "达到本轮 token 上限"
+		if s.cfg.MaxTokens > 0 && s.tokens >= s.cfg.MaxTokens {
+			stop, stopDetail = "max-s.tokens", "达到本轮 token 上限"
 			break
 		}
 
-		pr, err := propose()
+		pr, err := s.propose()
 		if err != nil {
 			stop, stopDetail = "propose-error", err.Error()
 			break
 		}
-		tokens += pr.Tokens
+		s.tokens += pr.Tokens
 		proposals := pr.Proposals
 		if len(proposals) == 0 {
 			stop, stopDetail = "no-proposals", "提案器没有给出可执行提案"
 			break
 		}
-		rep.Proposals = append(rep.Proposals, proposals...)
+		s.rep.Proposals = append(s.rep.Proposals, proposals...)
 		var p Proposal
 		found := false
 		for _, cand := range proposals {
@@ -214,20 +251,20 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 			break
 		}
 		exp := Experiment{
-			ID:        fmt.Sprintf("%s-c%d", runID, i+1),
+			ID:        fmt.Sprintf("%s-c%d", s.runID, i+1),
 			Title:     p.Title,
 			Risk:      p.Risk,
 			Status:    StatusProposed,
 			Proposal:  p,
-			StartedAt: cfg.now().Format(time.RFC3339),
+			StartedAt: s.cfg.now().Format(time.RFC3339),
 		}
-		logf("[%s] 提案 [%s] %s", exp.ID, p.Risk, p.Title)
+		s.logf("[%s] 提案 [%s] %s", exp.ID, p.Risk, p.Title)
 
 		if p.Risk == RiskC {
 			exp.Status = StatusSkipped
 			exp.Reason = "风险 C：不自动合并，留给人工"
-			exp.EndedAt = cfg.now().Format(time.RFC3339)
-			logf("[%s] 跳过（风险 C）", exp.ID)
+			exp.EndedAt = s.cfg.now().Format(time.RFC3339)
+			s.logf("[%s] 跳过（风险 C）", exp.ID)
 			record(exp)
 			consecutiveFailures++
 			if consecutiveFailures >= 2 {
@@ -238,7 +275,7 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		}
 
 		candBranch := "rsi/cand-" + exp.ID
-		candDir, err := prepareWorktree(ctx, repo, workRoot, "cand-"+exp.ID, candBranch, true, cfg.TargetBranch)
+		candDir, err := prepareWorktree(s.ctx, s.repo, s.workRoot, "cand-"+exp.ID, candBranch, true, s.cfg.TargetBranch)
 		if err != nil {
 			failed(&exp, StatusError, err.Error())
 			record(exp)
@@ -249,25 +286,25 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 			continue
 		}
 		cleanupCand := func() {
-			removeWorktree(ctx, repo, candDir)
-			deleteBranch(ctx, repo, candBranch)
+			removeWorktree(s.ctx, s.repo, candDir)
+			deleteBranch(s.ctx, s.repo, candBranch)
 		}
 
-		t0 := cfg.now()
-		impl, err := cfg.Implement(ctx, ImplementInput{
-			Repo:      repo,
-			BaseDir:   targetDir,
+		t0 := s.cfg.now()
+		impl, err := s.cfg.Implement(s.ctx, ImplementInput{
+			Repo:      s.repo,
+			BaseDir:   s.targetDir,
 			WorkDir:   candDir,
 			Proposal:  p,
-			MaxRounds: cfg.MaxRounds,
+			MaxRounds: s.cfg.MaxRounds,
 		})
 		exp.Tokens = impl.Tokens
 		exp.Summary = impl.Summary
-		tokens += impl.Tokens
-		exp.DurationMs = cfg.now().Sub(t0).Milliseconds()
+		s.tokens += impl.Tokens
+		exp.DurationMs = s.cfg.now().Sub(t0).Milliseconds()
 		if err != nil {
-			if p := captureWorktreePatch(ctx, candDir); p != "" {
-				_ = WritePatch(outDir, exp.ID, p)
+			if p := captureWorktreePatch(s.ctx, candDir); p != "" {
+				_ = WritePatch(s.outDir, exp.ID, p)
 			}
 			failed(&exp, StatusImplFailed, err.Error())
 			cleanupCand()
@@ -279,7 +316,7 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 			continue
 		}
 
-		commit, err := commitAll(ctx, candDir, "rsi: "+p.Title)
+		commit, err := commitAll(s.ctx, candDir, "rsi: "+p.Title)
 		if err != nil {
 			if err == errNoChanges {
 				failed(&exp, StatusNoChanges, "实现器没有产生文件改动")
@@ -296,20 +333,20 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		}
 		exp.Commit = commit
 
-		if d, err := diffStat(ctx, repo, cfg.TargetBranch, candBranch); err == nil {
+		if d, err := diffStat(s.ctx, s.repo, s.cfg.TargetBranch, candBranch); err == nil {
 			exp.Diff = d
-			logf("[%s] 改动：%d 个文件 +%d/-%d", exp.ID, d.Files, d.Added, d.Deleted)
+			s.logf("[%s] 改动：%d 个文件 +%d/-%d", exp.ID, d.Files, d.Added, d.Deleted)
 		}
-		if patch, err := gitOut(ctx, repo, "diff", cfg.TargetBranch+"..."+candBranch); err == nil {
-			_ = WritePatch(outDir, exp.ID, patch)
+		if patch, err := gitOut(s.ctx, s.repo, "diff", s.cfg.TargetBranch+"..."+candBranch); err == nil {
+			_ = WritePatch(s.outDir, exp.ID, patch)
 		}
 
-		gate, err := cfg.Gate(ctx, GateInput{
-			BaseDir:    targetDir,
+		gate, err := s.cfg.Gate(s.ctx, GateInput{
+			BaseDir:    s.targetDir,
 			CandDir:    candDir,
-			BaseBranch: cfg.TargetBranch,
+			BaseBranch: s.cfg.TargetBranch,
 			CandBranch: candBranch,
-			BaseEval:   baseEval,
+			BaseEval:   s.baseEval,
 		})
 		exp.Gate = &gate
 		if err != nil {
@@ -332,9 +369,9 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 			}
 			continue
 		}
-		logf("[%s] 门禁通过", exp.ID)
+		s.logf("[%s] 门禁通过", exp.ID)
 
-		merged, err := mergeCandidate(ctx, targetDir, candBranch, "rsi: merge "+exp.ID+" "+p.Title)
+		merged, err := mergeCandidate(s.ctx, s.targetDir, candBranch, "rsi: merge "+exp.ID+" "+p.Title)
 		if err != nil {
 			failed(&exp, StatusMergeFail, err.Error())
 			cleanupCand()
@@ -350,25 +387,25 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		// 单线程循环里目标分支在候选期间不会前进，合并结果树通常与候选树完全一致。
 		// 这种情况下 pre-merge 门禁已经覆盖了同一个树，再跑一遍全量测试只是重复烧时间。
 		// 一旦目标分支确实前进了（树不一致），仍然跑 post-merge 门禁并保留自动回滚。
-		if candTree, e1 := gitOut(ctx, repo, "rev-parse", exp.Commit+"^{tree}"); e1 == nil {
-			if targetTree, e2 := gitOut(ctx, targetDir, "rev-parse", "HEAD^{tree}"); e2 == nil && candTree == targetTree {
+		if candTree, e1 := gitOut(s.ctx, s.repo, "rev-parse", exp.Commit+"^{tree}"); e1 == nil {
+			if targetTree, e2 := gitOut(s.ctx, s.targetDir, "rev-parse", "HEAD^{tree}"); e2 == nil && candTree == targetTree {
 				exp.Status = StatusMerged
 				exp.Reason = "门禁通过，合并后树与候选一致（跳过重复门禁）"
-				exp.EndedAt = cfg.now().Format(time.RFC3339)
-				baseEval = gate.Eval
+				exp.EndedAt = s.cfg.now().Format(time.RFC3339)
+				s.baseEval = gate.Eval
 				consecutiveFailures = 0
-				logf("[%s] 已合入 %s（%s，树一致）", exp.ID, cfg.TargetBranch, shortHash(merged))
+				s.logf("[%s] 已合入 %s（%s，树一致）", exp.ID, s.cfg.TargetBranch, shortHash(merged))
 				cleanupCand()
 				record(exp)
 				continue
 			}
 		}
 
-		post, err := cfg.Gate(ctx, GateInput{
-			BaseDir:    targetDir,
-			CandDir:    targetDir,
-			BaseBranch: cfg.TargetBranch,
-			CandBranch: cfg.TargetBranch,
+		post, err := s.cfg.Gate(s.ctx, GateInput{
+			BaseDir:    s.targetDir,
+			CandDir:    s.targetDir,
+			BaseBranch: s.cfg.TargetBranch,
+			CandBranch: s.cfg.TargetBranch,
 			BaseEval:   gate.Eval,
 			PostMerge:  true,
 		})
@@ -380,8 +417,8 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 			} else {
 				reason += "：" + strings.Join(post.Failures, "；")
 			}
-			if rev, rerr := revertLastMerge(ctx, targetDir); rerr != nil {
-				keepTarget = true
+			if rev, rerr := revertLastMerge(s.ctx, s.targetDir); rerr != nil {
+				s.keepTarget = true
 				reason += "；回滚也失败：" + rerr.Error()
 			} else {
 				reason += "；已回滚 " + rev
@@ -397,27 +434,30 @@ func Run(ctx context.Context, cfg Config) (*RunReport, error) {
 		}
 
 		exp.Status = StatusMerged
-		exp.Reason = "门禁通过，已合入 " + cfg.TargetBranch
-		exp.EndedAt = cfg.now().Format(time.RFC3339)
-		baseEval = gate.Eval
+		exp.Reason = "门禁通过，已合入 " + s.cfg.TargetBranch
+		exp.EndedAt = s.cfg.now().Format(time.RFC3339)
+		s.baseEval = gate.Eval
 		consecutiveFailures = 0
-		logf("[%s] 已合入 %s（%s）", exp.ID, cfg.TargetBranch, shortHash(merged))
+		s.logf("[%s] 已合入 %s（%s）", exp.ID, s.cfg.TargetBranch, shortHash(merged))
 		cleanupCand()
 		record(exp)
 	}
-
-	if stop == "" {
-		stop = "max-candidates"
-		stopDetail = fmt.Sprintf("达到本轮候选上限 %d", cfg.MaxCandidates)
-	}
-	rep.Stop = stop
-	rep.StopDetail = stopDetail
-	rep.Tokens = tokens
-	save()
-	logf("=== 结束：%s（%s），候选 %d 个 ===", stop, stopDetail, len(rep.Experiments))
-	return rep, nil
+	return s.finish(stop, stopDetail)
 }
 
+// finish 写入本轮停止原因与统计。
+func (s *runState) finish(stop, stopDetail string) (*RunReport, error) {
+	if stop == "" {
+		stop = "max-candidates"
+		stopDetail = fmt.Sprintf("达到本轮候选上限 %d", s.cfg.MaxCandidates)
+	}
+	s.rep.Stop = stop
+	s.rep.StopDetail = stopDetail
+	s.rep.Tokens = s.tokens
+	s.save()
+	s.logf("=== 结束：%s（%s），候选 %d 个 ===", stop, stopDetail, len(s.rep.Experiments))
+	return s.rep, nil
+}
 func (c *Config) validate() error {
 	if strings.TrimSpace(c.Repo) == "" {
 		return fmt.Errorf("缺少 repo")
