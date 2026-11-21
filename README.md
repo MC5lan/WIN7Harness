@@ -8,7 +8,7 @@
   <img src="https://img.shields.io/badge/Go-1.20.14-00ADD8?style=flat-square&logo=go" alt="Go 1.20.14">
   <img src="https://img.shields.io/github/v/release/MC5lan/WIN7Harness?style=flat-square&color=E0663B" alt="Latest release">
   <img src="https://img.shields.io/github/stars/MC5lan/WIN7Harness?style=flat-square&color=FFB300" alt="Stars">
-  <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/license/MC5lan/WIN7Harness?style=flat-square&color=blue" alt="License">
 </p>
 
 <p align="center">
@@ -16,9 +16,9 @@
   纯 Go、单文件、零运行时依赖；界面用 Win32 GDI / Canvas 自绘，不依赖 WebView2、.NET、Electron 或任何浏览器运行时。
 </p>
 
-> [!IMPORTANT]
-> **源码可见，但禁止商业使用。** 本项目使用 [PolyForm Noncommercial 1.0.0](LICENSE)，**不是 OSI 认可的开源许可证**。
-> 个人学习、研究、爱好项目和非营利组织可以免费使用；公司、商业产品、付费服务等商业用途需要单独授权，见 [COMMERCIAL.md](COMMERCIAL.md)。
+> [!NOTE]
+> **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
+> 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 
 ---
 
@@ -258,15 +258,16 @@ scripts/              安装器回归、UI 回归、生命周期检查
 
 ## 授权
 
-本项目使用 **PolyForm Noncommercial 1.0.0**：
+本项目使用 **Apache License 2.0**（OSI 认可的开源许可证）：
 
-| ✅ 允许 | ❌ 不允许 |
+| ✅ 允许 | ⚠️ 需要遵守 |
 | :--- | :--- |
-| 个人学习、研究、实验、爱好项目 | 公司内部商业使用、商业产品、付费服务、SaaS、外包交付 |
-| 非营利组织、教育 / 研究 / 政府 / 公共安全 / 环保机构 | 去掉版权 / 许可声明后重新发布 |
-| 修改源码、分享给非商业用户（需保留 LICENSE 和 Required Notice） | 以商业为目的的二次分发 |
+| 个人与商业使用、内部工具、SaaS、外包交付 | 保留 [LICENSE](LICENSE)、[NOTICE](NOTICE) 与版权声明 |
+| 修改源码、私有部署、二次分发 | 修改过的文件需附显著变更说明 |
+| 专利授权（贡献者专利许可） | 不得使用项目名称 / 图标暗示官方背书（§6） |
+| 收费支持、咨询、定制开发 | 软件按 “AS IS” 提供，不附带担保（§7、§8） |
 
-商业授权请联系仓库维护者（通过 GitHub Issues 说明用途）。这不是 OSI 定义的开源许可证。
+商业使用**无需**单独授权；可选的商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 
 第三方组件和构建工具的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
