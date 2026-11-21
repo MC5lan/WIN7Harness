@@ -477,6 +477,23 @@ func (a *App) KeyDown(vk int32) bool {
 		return a.passwordKey(vk)
 	}
 	if isKitPage(a.page) {
+		return a.keyKit(vk)
+	}
+	if handled, res := a.keyOverlays(vk); handled {
+		return res
+	}
+	ctrl := win32.GetKeyState(win32.VK_CONTROL)
+	shift := win32.GetKeyState(win32.VK_SHIFT)
+	alt := win32.GetKeyState(win32.VK_MENU)
+	if a.keyShortcuts(vk, ctrl, shift, alt) {
+		return true
+	}
+	return a.keyNav(vk, ctrl, shift, alt)
+}
+
+// keyKit 处理 kit 页面的按键（焦点、翻页、输入）。
+func (a *App) keyKit(vk int32) bool {
+	if isKitPage(a.page) {
 		if vk == win32.VK_ESCAPE {
 			a.page = PageChat
 			return true
@@ -541,74 +558,41 @@ func (a *App) KeyDown(vk int32) bool {
 		}
 		return vk == win32.VK_RETURN || vk == win32.VK_ESCAPE
 	}
-	if vk == win32.VK_PRIOR || vk == win32.VK_NEXT {
-		step := float32(1)
-		if vk == win32.VK_PRIOR {
-			step = -1
-		}
-		switch a.page {
-		case PageChat:
-			if a.ui.Focus() != "input" && a.modal == nil {
-				view := float32(a.winH - 46 - a.inputHeight() - 12)
-				max := float32(a.contentH) - view
-				if max < 0 {
-					max = 0
-				}
-				a.scroll += step * view * 0.85
-				if a.scroll < 0 {
-					a.scroll = 0
-				}
-				if a.scroll > max {
-					a.scroll = max
-				}
-				a.autoScroll = a.scroll >= max-4
-				return true
-			}
-		case PageSettings:
-			view := float32(a.winH - 144)
-			max := float32(a.settingsH) - view
-			if max < 0 {
-				max = 0
-			}
-			a.settingsScrl += step * view * 0.85
-			if a.settingsScrl < 0 {
-				a.settingsScrl = 0
-			}
-			if a.settingsScrl > max {
-				a.settingsScrl = max
-			}
-			return true
-		}
-	}
+	return false
+}
+
+// keyOverlays 处理改名、二维码、命令面板、历史、菜单、弹窗与补全。
+// 第一个返回值表示事件是否被这一层接管，第二个返回值是最终结果。
+func (a *App) keyOverlays(vk int32) (bool, bool) {
 	if a.editingID >= 0 {
 		switch vk {
 		case win32.VK_ESCAPE:
 			a.commitRename(false)
-			return true
+			return true, true
 		case win32.VK_RETURN:
 			a.commitRename(true)
-			return true
+			return true, true
 		}
 		if a.fieldKey(vk) {
-			return true
+			return true, true
 		}
-		return true // 改名期间吞掉其余按键，避免误触发发送/滚动
+		return true, true // 改名期间吞掉其余按键，避免误触发发送/滚动
 	}
 	if a.qrVisible() {
 		switch vk {
 		case win32.VK_ESCAPE, win32.VK_RETURN, win32.VK_SPACE:
 			a.closeQR()
 		}
-		return true
+		return true, true
 	}
 	if a.palOpen {
-		return a.palKey(vk)
+		return true, a.palKey(vk)
 	}
 	if a.histOpen {
-		return a.histKey(vk)
+		return true, a.histKey(vk)
 	}
 	if a.menu != nil {
-		return a.menuKey(vk)
+		return true, a.menuKey(vk)
 	}
 	if a.modal != nil {
 		// 富差分与方案弹窗的默认键都是"安全侧"：Esc/回车默认取消或拒绝，
@@ -626,7 +610,7 @@ func (a *App) KeyDown(vk int32) bool {
 					a.modalCancelDiff()
 				}
 			}
-			return true
+			return true, true
 		}
 		if a.modal.Kind == modalPlan {
 			switch vk {
@@ -643,54 +627,54 @@ func (a *App) KeyDown(vk int32) bool {
 					a.modalAnswerPlan("reject", "")
 				}
 			}
-			return true
+			return true, true
 		}
 		switch vk {
 		case win32.VK_ESCAPE:
 			a.modalAnswer(false)
-			return true
+			return true, true
 		case win32.VK_TAB, win32.VK_LEFT, win32.VK_RIGHT:
 			a.modalOKFocused = !a.modalOKFocused
-			return true
+			return true, true
 		case win32.VK_RETURN, win32.VK_SPACE:
 			a.modalAnswer(a.modalOKFocused)
-			return true
+			return true, true
 		}
-		return true
+		return true, true
 	}
 
 	if len(a.comp) > 0 && a.ui.Focus() == "input" && a.page == PageChat {
 		switch vk {
 		case win32.VK_ESCAPE:
 			a.comp = nil
-			return true
+			return true, true
 		case win32.VK_UP:
 			a.compIdx--
 			if a.compIdx < 0 {
 				a.compIdx = len(a.comp) - 1
 			}
-			return true
+			return true, true
 		case win32.VK_DOWN:
 			a.compIdx++
 			if a.compIdx >= len(a.comp) {
 				a.compIdx = 0
 			}
-			return true
+			return true, true
 		case win32.VK_TAB:
 			if a.acceptComplete() {
-				return true
+				return true, true
 			}
 		case win32.VK_RETURN:
 			if a.acceptComplete() {
-				return true
+				return true, true
 			}
 		}
 	}
+	return false, false
+}
 
-	ctrl := win32.GetKeyState(win32.VK_CONTROL)
-	shift := win32.GetKeyState(win32.VK_SHIFT)
-	alt := win32.GetKeyState(win32.VK_MENU)
-
+// keyShortcuts 处理组合键与非聊天输入框的编辑键。
+func (a *App) keyShortcuts(vk int32, ctrl, shift, alt bool) bool {
 	// Ctrl+, 打开设置（0xBC = VK_OEM_COMMA）。桌面应用通用快捷键，
 	// 也给“设置入口在左下角”提供一条不依赖鼠标的路径。
 	if ctrl && a.cfg != nil && a.cfg.Onboarded && vk == 0xBC {
@@ -759,7 +743,11 @@ func (a *App) KeyDown(vk int32) bool {
 		a.ui.SetFocus("input")
 		return true
 	}
+	return false
+}
 
+// keyNav 处理聊天页最终按键：复制、粘贴、新建、历史与翻页。
+func (a *App) keyNav(vk int32, ctrl, shift, alt bool) bool {
 	switch vk {
 	case win32.VK_ESCAPE:
 		if a.streaming {
