@@ -671,7 +671,13 @@ func (a *App) saveSettings() {
 		a.toast("保存失败："+err.Error(), true)
 		return
 	}
+	// 保存后重建引擎，但必须把当前会话的结构化历史带过去；
+	// 否则用户只是改了个温度/窗口，回到对话发现模型“失忆”了。
+	if cv := a.currentConv(); cv != nil {
+		a.syncEngineTranscript(cv)
+	}
 	a.rebuildEngine()
+	a.restoreHistory()
 	a.toast("设置已保存", false)
 	a.page = PageChat
 }

@@ -56,6 +56,9 @@ func (a *App) paintSettings(c *ui.Canvas) {
 	// 顶栏
 	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
 	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
+	// 顶栏兜底命中区必须先登记：UI.HitAt 从后往前找，后登记的按钮才能优先。
+	// 之前放在函数末尾，整条顶栏把“保存/返回”按钮吃掉了，点哪都没反应。
+	a.ui.Hit("set.top", ui.R(a.railW, 0, W-a.railW, 56))
 	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
 	c.TextFace(a.railW+56, 15, "设置", ui.FsLg, 700, th.Text, ui.FaceUI)
 	c.TextFace(a.railW+56+c.MeasureFace("设置", ui.FsLg, 700, ui.FaceUI)+14, 20,
@@ -158,8 +161,6 @@ func (a *App) paintSettings(c *ui.Canvas) {
 		}
 		c.TextFace(a.railW+24, H-48, ellipsis(c, a.testMsg, ui.FsXs, 400, W-a.railW-48), ui.FsXs, 400, col, ui.FaceUI)
 	}
-	// 顶栏最后注册，吸收滚动内容溢出到顶栏区域的点击。
-	a.ui.Hit("set.top", ui.R(a.railW, 0, W-a.railW, 56))
 }
 
 // applySettingsPreset 只切换接入方式，不替用户猜模型名。
@@ -545,7 +546,11 @@ func (a *App) settingsNetTab(p *settingsPane) {
 		}
 		if u.Button(opt.id, opt.label, ui.R(px, iy, 88, 28), kind) {
 			a.cfg.ProxyMode = opt.mode
+			if cv := a.currentConv(); cv != nil {
+				a.syncEngineTranscript(cv)
+			}
 			a.rebuildEngine()
+			a.restoreHistory()
 			a.toast("代理方式已切换："+opt.label, false)
 		}
 		px += 96
@@ -586,7 +591,7 @@ func (a *App) settingsNetTab(p *settingsPane) {
 func (a *App) settingsBudgetTab(p *settingsPane) {
 	c, u := p.c, p.u
 	th := a.th
-	r := p.card("预算与限制", 330)
+	r := p.card("预算与限制", 398)
 	ix := r.X + 22
 	iy := r.Y + 50
 	iw := r.W - 44
@@ -608,6 +613,28 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	c.TextFace(ix+332, iy+4, "轮数 0 = 不限制（大工程建议 0 或 300+）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	c.TextFace(ix+332, iy+24, "窗口 0 = 按 128k 估；超时 0 = 1200 秒", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 64
+
+	c.TextFace(ix, iy+4, "上下文窗口预设", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	px := ix + 120
+	for _, opt := range []struct {
+		label string
+		val   int
+	}{
+		{"auto", 0}, {"8k", 8000}, {"32k", 32000}, {"128k", 128000}, {"200k", 200000},
+	} {
+		kind := BtnGhost
+		if a.cfg.ContextWindow == opt.val {
+			kind = BtnPrimary
+		}
+		if u.Button("set.ctx."+opt.label, opt.label, ui.R(px, iy, 58, 28), kind) {
+			a.cfg.ContextWindow = opt.val
+			a.ui.SetField("set.ctxwin", strconv.Itoa(opt.val))
+			a.Redraw()
+		}
+		px += 64
+	}
+	c.TextFace(px+6, iy+5, "小模型建议 32k 或更小；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	iy += 44
 
 	c.TextFace(ix, iy, "自定义单价（美元 / 百万 token）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	c.TextFace(ix+c.MeasureFace("自定义单价（美元 / 百万 token）", ui.FsXs, 500, ui.FaceUI)+14, iy,
