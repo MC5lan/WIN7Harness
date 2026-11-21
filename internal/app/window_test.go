@@ -25,7 +25,8 @@ func TestHitOrderTopBarButtonsWin(t *testing.T) {
 func TestParseWindowSize(t *testing.T) {
 	cases := map[string]int{
 		"auto": 0, "0": 0, "32k": 32000, "128K": 128000,
-		"200k": 200000, "1m": 1000000, "64000": 64000,
+		"200k": 200000, "300k": 300000, "600k": 600000, "960k": 960000,
+		"1m": 1000000, "64000": 64000,
 	}
 	for in, want := range cases {
 		got, ok := parseWindowSize(in)

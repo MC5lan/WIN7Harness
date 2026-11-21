@@ -177,7 +177,7 @@ func (a *App) slashContext(rest string) bool {
 			return true
 		}
 		if !strings.HasPrefix(lower, "window") {
-			a.sysNote("用法：`/context` 查看分段；`/context window 32k` 设置上下文窗口；`/context cache auto|off|anthropic` 设置缓存策略")
+			a.sysNote("用法：`/context` 查看分段；`/context window 32k` 设置上下文窗口（支持 300k/600k/960k/1m）；`/context cache auto|off|anthropic` 设置缓存策略")
 			return true
 		}
 		val := strings.TrimSpace(arg[len("window"):])
@@ -213,6 +213,9 @@ func (a *App) slashContext(rest string) bool {
 	b.WriteString("**上下文预算**（估算，实际以服务端 usage 为准）\n")
 	fmt.Fprintf(&b, "- 模型窗口 %s token · 自动压缩阈值 %s · 当前历史 %d 条 / %s 字符 / 约 %s token\n",
 		humanTokens(window), humanTokens(limit), msgs, core.HumanSize(int64(chars)), humanTokens(histTok))
+	if strconv.IntSize == 32 {
+		b.WriteString("- 当前是 32 位进程：压缩预算硬上限约 60k token，超大窗口只影响模型侧上限，不会按满窗口分配内存。\n")
+	}
 	fmt.Fprintf(&b, "- 工具定义 %d 个 / %s 字符（profile=%s，计划模式=%v）\n",
 		toolN, core.HumanSize(int64(toolChars)), a.eng.EffectiveToolProfile(), a.eng.PlanMode)
 	if a.cfg != nil {

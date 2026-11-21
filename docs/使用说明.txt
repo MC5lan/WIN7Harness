@@ -1,4 +1,4 @@
-WIN7 Harness v1.39.3 —— 使用说明
+WIN7 Harness v1.39.4 —— 使用说明
 ================================================================
 
 一个能在 Windows 7 SP1 上跑起来的本地 AI 编程智能体。
@@ -8,7 +8,7 @@ WIN7 Harness v1.39.3 —— 使用说明
 一、安装与升级
 ----------------------------------------------------------------
 推荐用安装包：
-  WIN7Harness-v1.39.3-Setup.exe
+  WIN7Harness-v1.39.4-Setup.exe
 
 双击后按向导走：
 
@@ -296,7 +296,7 @@ AGENTS.md > HARNESS.md > CLAUDE.md > .harness.md，越近的目录优先级越�
     /status    查看本会话模型、工作目录、上下文占用、token 用量与费用估算
     /context   查看系统提示分段、工具定义、缓存稳定前缀与上下文预算，
                用于排查“模型到底看到了什么 / 为什么缓存命中低”；
-               /context window 32k 可设置上下文窗口（auto/8k/16k/32k/64k/128k/200k/1m）；
+               /context window 32k 可设置上下文窗口（auto/8k/16k/32k/64k/128k/200k/300k/600k/960k/1m）；
                /context cache auto|off|anthropic 设置提示缓存策略（auto 只对已知网关启用）
     /model     查看 / 切换本会话模型：不带参数列出可选模型，
                /model 2 或 /model qwen3-coder 直接切；/model default 回到默认
@@ -1803,7 +1803,7 @@ skill_list / 工作区路径，不会再扫描整个 C:\Users。
      profile 等设置不会再把当前对话清空。
 
 3. 上下文窗口
-   - 设置 → 预算 新增预设：auto / 8k / 32k / 128k / 200k；
+   - 设置 → 预算 新增预设：auto / 8k / 32k / 128k / 200k / 300k / 600k / 960k；
      也可以手动填 `context_window` 后保存。
    - 命令方式仍可用：`/context window 32k`。
    - 保存后新会话/当前会话的压缩阈值立即按新窗口计算。

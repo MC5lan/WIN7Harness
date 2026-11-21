@@ -621,7 +621,7 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	c.TextFace(ix+224, iy, "子代理超时", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	u.TextField("set.subto", ui.R(ix+224, iy+18, 96, 32), "", "1200")
 	c.TextFace(ix+332, iy+4, "轮数 0 = 不限制（大工程建议 0 或 300+）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	c.TextFace(ix+332, iy+24, "窗口 0 = 按 128k 估；超时 0 = 1200 秒", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(ix+332, iy+24, "窗口 0 = 128k 兜底；超时 0 = 1200 秒", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 64
 
 	c.TextFace(ix, iy+4, "上下文窗口预设", ui.FsXs, 500, th.TextDim, ui.FaceUI)
@@ -636,19 +636,23 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 		label string
 		val   int
 	}{
-		{"auto", 0}, {"8k", 8000}, {"32k", 32000}, {"128k", 128000}, {"200k", 200000},
+		{"auto", 0}, {"8k", 8000}, {"32k", 32000}, {"128k", 128000},
+		{"200k", 200000}, {"300k", 300000}, {"600k", 600000}, {"960k", 960000},
 	} {
 		kind := BtnGhost
 		if curWin == opt.val {
 			kind = BtnPrimary
 		}
-		if u.Button("set.ctx."+opt.label, opt.label, ui.R(px, iy, 58, 28), kind) {
+		if u.Button("set.ctx."+opt.label, opt.label, ui.R(px, iy, 54, 28), kind) {
 			a.ui.SetField("set.ctxwin", strconv.Itoa(opt.val))
+			if opt.val >= 300000 && runtime.GOARCH == "386" {
+				a.toast("32 位进程会保留约 60k token 的压缩预算上限，超大窗口不会按满窗口分配内存", true)
+			}
 			a.Redraw()
 		}
-		px += 64
+		px += 58
 	}
-	c.TextFace(px+6, iy+5, "小模型建议 32k 或更小；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(px+6, iy+5, "大窗口选 300k/600k/960k；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 44
 
 	c.TextFace(ix, iy, "自定义单价（美元 / 百万 token）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
