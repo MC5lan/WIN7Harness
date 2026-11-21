@@ -554,6 +554,27 @@ func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 	}()
 
 	switch msg {
+	case win32.WM_ERASEBKGND, win32.WM_SIZE, win32.WM_ACTIVATE, win32.WM_SHOWWINDOW, win32.WM_PAINT:
+		return w.procPaint(h, msg, wp, lp)
+	case win32.WM_DROPFILES, snipMsg, win32.WM_GETOBJECT:
+		return w.procDrop(h, msg, wp, lp)
+	case win32.WM_SETTINGCHANGE, win32.WM_THEMECHANGED, win32.WM_DISPLAYCHANGE, win32.WM_TIMER,
+		win32.WM_QUERYENDSESSION, win32.WM_ENDSESSION, win32.WM_POWERBROADCAST, win32.WM_WTSSESSION_CHANGE,
+		win32.WM_SETCURSOR, win32.WM_GETMINMAXINFO, win32.WM_CLOSE, win32.WM_DESTROY, win32.TrayMsg:
+		return w.procSystem(h, msg, wp, lp)
+	case win32.WM_MOUSEMOVE, win32.WM_MOUSELEAVE, win32.WM_LBUTTONDOWN, win32.WM_LBUTTONUP,
+		win32.WM_LBUTTONDBLCLK, win32.WM_RBUTTONDOWN, win32.WM_RBUTTONUP, win32.WM_MOUSEWHEEL:
+		return w.procMouse(h, msg, wp, lp)
+	case win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN, win32.WM_CHAR,
+		win32.WM_IME_STARTCOMPOSITION, win32.WM_IME_COMPOSITION, 0x010E:
+		return w.procKeyboard(h, msg, wp, lp)
+	}
+	return win32.DefWindowProc(h, msg, wp, lp)
+}
+
+// procPaint 处理擦背景、尺寸、激活、显示与绘制。
+func (w *Window) procPaint(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
+	switch msg {
 	case win32.WM_ERASEBKGND:
 		return 1
 
@@ -614,7 +635,13 @@ func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 		}
 		win32.EndPaint(h, &ps)
 		return 0
+	}
+	return win32.DefWindowProc(h, msg, wp, lp)
+}
 
+// procDrop 处理拖放文件、PrintScreen 钩子与 MSAA 对象。
+func (w *Window) procDrop(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
+	switch msg {
 	case win32.WM_DROPFILES:
 		paths := win32.ExtractDroppedFiles(wp)
 		if len(paths) > 0 {
@@ -650,7 +677,13 @@ func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 			return r
 		}
 		return win32.DefWindowProc(h, msg, wp, lp)
+	}
+	return win32.DefWindowProc(h, msg, wp, lp)
+}
 
+// procSystem 处理主题/DPI、会话、电源、光标、最小尺寸与退出。
+func (w *Window) procSystem(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
+	switch msg {
 	case win32.WM_SETTINGCHANGE, win32.WM_THEMECHANGED, win32.WM_DISPLAYCHANGE:
 		// Win7 没有 WM_DPICHANGED（那是 8.1 才有的每显示器 DPI 通知）：
 		// 改缩放比例、切换显示器、调分辨率都只发这些消息。
@@ -678,129 +711,6 @@ func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 		// 节拍由线程定时器在消息循环里直接处理（见 RunWindow），
 		// 窗口定时器分支保留给系统/外部代码，不在这里重复推进。
 		return 0
-
-	case win32.WM_MOUSEMOVE:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		if !w.tracking {
-			w.tracking = true
-			win32.TrackMouseLeave(h)
-		}
-		if x != w.mouseX || y != w.mouseY {
-			w.mouseX, w.mouseY = x, y
-			w.app.MouseMove(w.lx(x), w.ly(y))
-			w.Invalidate()
-		}
-		return 0
-
-	case win32.WM_MOUSELEAVE:
-		w.tracking = false
-		w.mouseX, w.mouseY = -1000, -1000
-		w.app.MouseMove(-1000, -1000)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_LBUTTONDOWN:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		win32.SetFocus(h)
-		win32.SetCapture(h)
-		w.app.MouseDown(w.lx(x), w.ly(y), 0)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_LBUTTONUP:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		win32.ReleaseCapture()
-		w.app.MouseUp(w.lx(x), w.ly(y), 0)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_LBUTTONDBLCLK:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		w.app.DoubleClick(w.lx(x), w.ly(y))
-		w.Invalidate()
-		return 0
-
-	case win32.WM_RBUTTONDOWN:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		w.app.MouseDown(w.lx(x), w.ly(y), 1)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_RBUTTONUP:
-		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
-		w.app.MouseUp(w.lx(x), w.ly(y), 1)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_MOUSEWHEEL:
-		// 原样把系统滚轮增量交给应用：高精度滚轮/触控板会发送小于 120 的
-		// 增量，若在这里先除 120 再取整会被抹成 0，表现为"滚轮完全没反应"。
-		// 节流与整格换算统一由 App 的 wheelNotches 处理。
-		delta := int32(int16((wp >> 16) & 0xFFFF))
-		pt := win32.POINT{X: int32(int16(lp & 0xFFFF)), Y: int32(int16((lp >> 16) & 0xFFFF))}
-		win32.ScreenToClientPoint(h, &pt)
-		w.app.MouseWheel(w.lx(pt.X), w.ly(pt.Y), delta)
-		w.Invalidate()
-		return 0
-
-	case win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN:
-		// IME 组字中：键盘事件归输入法（Enter 上屏、退格删拼音、数字选词…），
-		// 不能让应用把 Enter 当成“发送”。
-		if w.composing {
-			return win32.DefWindowProc(h, msg, wp, lp)
-		}
-		if w.app.KeyDown(int32(wp)) {
-			// 按键被消费后立即请求重绘：非字符键（Backspace/Delete/方向键/Tab/Enter）
-			// 没有 WM_CHAR 兜底，过去要等 250ms 空闲节拍才上屏（"打字快、删字慢"）。
-			w.Invalidate()
-			return 0
-		}
-		return win32.DefWindowProc(h, msg, wp, lp)
-
-	case win32.WM_CHAR:
-		// 同上：组字期间的字符事件归输入法（committed 文本会在 END 之后以 WM_CHAR 到达）
-		if w.composing {
-			return win32.DefWindowProc(h, msg, wp, lp)
-		}
-		ch := uint16(wp)
-		if ch >= 0xD800 && ch <= 0xDBFF {
-			w.pendingHigh = ch
-			return 0
-		}
-		if ch >= 0xDC00 && ch <= 0xDFFF && w.pendingHigh != 0 {
-			r := utf16.DecodeRune(rune(w.pendingHigh), rune(ch))
-			w.pendingHigh = 0
-			w.app.Char(r)
-			w.Invalidate()
-			return 0
-		}
-		w.pendingHigh = 0
-		if ch < 32 || ch == 127 {
-			return 0
-		}
-		w.app.Char(rune(ch))
-		w.Invalidate()
-		return 0
-
-	case win32.WM_IME_STARTCOMPOSITION, win32.WM_IME_COMPOSITION, 0x010E: // 0x010E = WM_IME_ENDCOMPOSITION
-		// 自绘输入框没有子编辑控件：每次组字都把组字窗与候选窗挪到当前光标处。
-		// 收尾时也刷新一次，避免窗口残留。
-		// 进入/退出组字态：进入后键盘事件全部交给 IME（见 WM_KEYDOWN/WM_CHAR）。
-		switch msg {
-		case win32.WM_IME_STARTCOMPOSITION:
-			w.composing = true
-		case 0x010E:
-			w.composing = false
-		}
-		if ca, ok := w.app.(CaretApp); ok {
-			if cx, cy, valid := ca.CaretPos(); valid {
-				px, py := w.px(cx), w.px(cy)
-				win32.SetCompositionPos(h, px, py)
-				win32.SetCandidatePos(h, px, py)
-			}
-		}
-		return win32.DefWindowProc(h, msg, wp, lp)
-
 	case win32.WM_QUERYENDSESSION:
 		// 只做快速落盘，不停止队列：用户可能取消关机。
 		// 返回 TRUE 表示允许系统继续注销/关机。
@@ -887,6 +797,140 @@ func (w *Window) proc(h win32.HWND, msg uint32, wp, lp uintptr) (ret uintptr) {
 	case win32.TrayMsg:
 		w.trayEvent(lp)
 		return 0
+	}
+	return win32.DefWindowProc(h, msg, wp, lp)
+}
+
+// procMouse 处理鼠标移动、离开、按键与滚轮。
+func (w *Window) procMouse(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
+	switch msg {
+	case win32.WM_MOUSEMOVE:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		if !w.tracking {
+			w.tracking = true
+			win32.TrackMouseLeave(h)
+		}
+		if x != w.mouseX || y != w.mouseY {
+			w.mouseX, w.mouseY = x, y
+			w.app.MouseMove(w.lx(x), w.ly(y))
+			w.Invalidate()
+		}
+		return 0
+
+	case win32.WM_MOUSELEAVE:
+		w.tracking = false
+		w.mouseX, w.mouseY = -1000, -1000
+		w.app.MouseMove(-1000, -1000)
+		w.Invalidate()
+		return 0
+
+	case win32.WM_LBUTTONDOWN:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		win32.SetFocus(h)
+		win32.SetCapture(h)
+		w.app.MouseDown(w.lx(x), w.ly(y), 0)
+		w.Invalidate()
+		return 0
+
+	case win32.WM_LBUTTONUP:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		win32.ReleaseCapture()
+		w.app.MouseUp(w.lx(x), w.ly(y), 0)
+		w.Invalidate()
+		return 0
+
+	case win32.WM_LBUTTONDBLCLK:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		w.app.DoubleClick(w.lx(x), w.ly(y))
+		w.Invalidate()
+		return 0
+
+	case win32.WM_RBUTTONDOWN:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		w.app.MouseDown(w.lx(x), w.ly(y), 1)
+		w.Invalidate()
+		return 0
+
+	case win32.WM_RBUTTONUP:
+		x, y := int32(int16(lp&0xFFFF)), int32(int16((lp>>16)&0xFFFF))
+		w.app.MouseUp(w.lx(x), w.ly(y), 1)
+		w.Invalidate()
+		return 0
+
+	case win32.WM_MOUSEWHEEL:
+		// 原样把系统滚轮增量交给应用：高精度滚轮/触控板会发送小于 120 的
+		// 增量，若在这里先除 120 再取整会被抹成 0，表现为"滚轮完全没反应"。
+		// 节流与整格换算统一由 App 的 wheelNotches 处理。
+		delta := int32(int16((wp >> 16) & 0xFFFF))
+		pt := win32.POINT{X: int32(int16(lp & 0xFFFF)), Y: int32(int16((lp >> 16) & 0xFFFF))}
+		win32.ScreenToClientPoint(h, &pt)
+		w.app.MouseWheel(w.lx(pt.X), w.ly(pt.Y), delta)
+		w.Invalidate()
+		return 0
+	}
+	return win32.DefWindowProc(h, msg, wp, lp)
+}
+
+// procKeyboard 处理键盘、字符与 IME 组合消息。
+func (w *Window) procKeyboard(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
+	switch msg {
+	case win32.WM_KEYDOWN, win32.WM_SYSKEYDOWN:
+		// IME 组字中：键盘事件归输入法（Enter 上屏、退格删拼音、数字选词…），
+		// 不能让应用把 Enter 当成“发送”。
+		if w.composing {
+			return win32.DefWindowProc(h, msg, wp, lp)
+		}
+		if w.app.KeyDown(int32(wp)) {
+			// 按键被消费后立即请求重绘：非字符键（Backspace/Delete/方向键/Tab/Enter）
+			// 没有 WM_CHAR 兜底，过去要等 250ms 空闲节拍才上屏（"打字快、删字慢"）。
+			w.Invalidate()
+			return 0
+		}
+		return win32.DefWindowProc(h, msg, wp, lp)
+
+	case win32.WM_CHAR:
+		// 同上：组字期间的字符事件归输入法（committed 文本会在 END 之后以 WM_CHAR 到达）
+		if w.composing {
+			return win32.DefWindowProc(h, msg, wp, lp)
+		}
+		ch := uint16(wp)
+		if ch >= 0xD800 && ch <= 0xDBFF {
+			w.pendingHigh = ch
+			return 0
+		}
+		if ch >= 0xDC00 && ch <= 0xDFFF && w.pendingHigh != 0 {
+			r := utf16.DecodeRune(rune(w.pendingHigh), rune(ch))
+			w.pendingHigh = 0
+			w.app.Char(r)
+			w.Invalidate()
+			return 0
+		}
+		w.pendingHigh = 0
+		if ch < 32 || ch == 127 {
+			return 0
+		}
+		w.app.Char(rune(ch))
+		w.Invalidate()
+		return 0
+
+	case win32.WM_IME_STARTCOMPOSITION, win32.WM_IME_COMPOSITION, 0x010E: // 0x010E = WM_IME_ENDCOMPOSITION
+		// 自绘输入框没有子编辑控件：每次组字都把组字窗与候选窗挪到当前光标处。
+		// 收尾时也刷新一次，避免窗口残留。
+		// 进入/退出组字态：进入后键盘事件全部交给 IME（见 WM_KEYDOWN/WM_CHAR）。
+		switch msg {
+		case win32.WM_IME_STARTCOMPOSITION:
+			w.composing = true
+		case 0x010E:
+			w.composing = false
+		}
+		if ca, ok := w.app.(CaretApp); ok {
+			if cx, cy, valid := ca.CaretPos(); valid {
+				px, py := w.px(cx), w.px(cy)
+				win32.SetCompositionPos(h, px, py)
+				win32.SetCandidatePos(h, px, py)
+			}
+		}
+		return win32.DefWindowProc(h, msg, wp, lp)
 	}
 	return win32.DefWindowProc(h, msg, wp, lp)
 }
