@@ -74,7 +74,6 @@ func (a *App) applyPreset(i int) {
 
 func (a *App) paintOnboard(c *ui.Canvas) {
 	th := a.th
-	u := a.ui
 	W, H := a.winW, a.winH
 
 	// 背景渐变：左侧品牌区带一层极淡的强调色，避免整页发白。
@@ -85,8 +84,27 @@ func (a *App) paintOnboard(c *ui.Canvas) {
 		leftW = 640
 	}
 
-	// 左侧品牌区
-	cb := ui.R(48, 48, leftW-96, H-96)
+	a.paintOnboardBrand(c, ui.R(48, 48, leftW-96, H-96))
+
+	// 右侧配置卡片
+	cw := int32(520)
+	if W-leftW < 560 {
+		cw = W - leftW - 48
+	}
+	card := ui.R(leftW+24, 48, cw, H-96)
+	if card.Bottom() > H-24 {
+		card.H = H - 96
+	}
+	c.Round(card, 8, th.Card)
+	// 外圈浅描边 + 内圈实线：给白卡片一点浮起感，不靠阴影滤镜。
+	c.RoundStroke(card.Inset(-2), 10, th.BorderSoft)
+	c.RoundStroke(card, 8, th.Border)
+	a.paintOnboardForm(c, card)
+}
+
+// paintOnboardBrand 绘制首次启动页左侧品牌与特性列表。
+func (a *App) paintOnboardBrand(c *ui.Canvas, cb ui.Rect) {
+	th := a.th
 	DrawLogo(c, cb.X, cb.Y+8, 44, th.Accent, th.Bg)
 	c.TextFace(cb.X+58, cb.Y+8, "WIN7 Harness", ui.FsH1, 700, th.Text, ui.FaceUI)
 	c.TextFace(cb.X+58, cb.Y+44, "零依赖的本机编程智能体", ui.FsBase, 400, th.TextDim, ui.FaceUI)
@@ -114,21 +132,12 @@ func (a *App) paintOnboard(c *ui.Canvas) {
 		c.TextFace(r.X+52, r.Y+32, ellipsis(c, f[1], ui.FsXs, 400, r.W-70), ui.FsXs, 400, th.TextDim, ui.FaceUI)
 		y += 68
 	}
+}
 
-	// 右侧配置卡片
-	cw := int32(520)
-	if W-leftW < 560 {
-		cw = W - leftW - 48
-	}
-	card := ui.R(leftW+24, 48, cw, H-96)
-	if card.Bottom() > H-24 {
-		card.H = H - 96
-	}
-	c.Round(card, 8, th.Card)
-	// 外圈浅描边 + 内圈实线：给白卡片一点浮起感，不靠阴影滤镜。
-	c.RoundStroke(card.Inset(-2), 10, th.BorderSoft)
-	c.RoundStroke(card, 8, th.Border)
-
+// paintOnboardForm 绘制首次启动页右侧连接配置卡片。
+func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
+	th := a.th
+	u := a.ui
 	x := card.X + 28
 	iw := card.W - 56
 	yy := card.Y + 24
