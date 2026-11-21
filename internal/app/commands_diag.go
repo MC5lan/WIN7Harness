@@ -226,6 +226,9 @@ func (a *App) slashContext(rest string) bool {
 		toolN, core.HumanSize(int64(toolChars)), a.eng.EffectiveToolProfile(), a.eng.PlanMode)
 	if a.cfg != nil {
 		fmt.Fprintf(&b, "- 提示缓存策略：%s（auto 只对已知支持 cache_control 的网关启用）\n", a.cfg.PromptCache)
+		if cap := core.SuggestModelCapabilities(a.cfg.Provider().BaseURL, a.eng.Model); cap.ContextWindow > 0 {
+			fmt.Fprintf(&b, "- 模型推测窗口：%s（%s，仅供参考）\n", humanTokens(cap.ContextWindow), cap.Source)
+		}
 	}
 	if name := a.eng.ActiveSkill(); name != "" {
 		fmt.Fprintf(&b, "- 已激活技能：%s（/skill off 取消）\n", name)

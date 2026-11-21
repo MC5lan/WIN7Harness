@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"win7harness/internal/agent"
 	"win7harness/internal/core"
 	"win7harness/internal/llm"
 )
@@ -468,22 +469,29 @@ func (a *App) syncEngineTranscript(cv *Conv) {
 		return
 	}
 	maxBytes := 1 << 20
-	// 64 位进程在大窗口下保留更长的结构化轨迹；32 位仍守 1MB，避免会话
-	// 序列化和内存复制把地址空间打爆。
-	if strconv.IntSize == 64 && a.cfg != nil && a.cfg.ContextWindow >= 300000 {
+	maxTokens := 60_000
+	// 64 位进程在大窗口下保留更长的结构化轨迹；32 位仍守 1MB，
+	// 避免会话序列化和内存复制把地址空间打爆。
+	if strconv.IntSize == 64 {
 		maxBytes = 2 << 20
+		maxTokens = 120_000
+		if a.cfg != nil && a.cfg.ContextWindow >= 300000 {
+			maxTokens = 200_000
+		}
 	}
-	cv.EngineMsgs = pruneEngineMsgs(a.eng.History(), 320, maxBytes)
+	cv.EngineMsgs = pruneEngineMsgs(a.eng.History(), 320, maxBytes, maxTokens)
 }
 
-// pruneEngineMsgs 保留最近 N 条/约 1MB 的结构化消息，并把图片 data URL 去掉。
-// 从尾部向前取，保证最后一轮工具调用/Tool 结果成对；起点落在 tool 上时向前对齐。
-func pruneEngineMsgs(msgs []llm.Message, maxN, maxBytes int) []llm.Message {
+// pruneEngineMsgs 保留最近 N 条/字节/token 三者中最严的一段结构化消息，
+// 并把图片 data URL 去掉。从尾部向前取，保证最后一轮工具调用/Tool 结果成对；
+// 起点落在 tool 上时向前对齐。
+func pruneEngineMsgs(msgs []llm.Message, maxN, maxBytes, maxTokens int) []llm.Message {
 	if len(msgs) == 0 {
 		return nil
 	}
 	start := len(msgs)
-	total := 0
+	totalBytes := 0
+	totalTokens := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
 		l := len(msgs[i].Content) + len(msgs[i].Reasoning)
 		for _, tc := range msgs[i].ToolCalls {
@@ -496,10 +504,12 @@ func pruneEngineMsgs(msgs []llm.Message, maxN, maxBytes int) []llm.Message {
 				l += len(p.Text)
 			}
 		}
-		if start < len(msgs) && (len(msgs)-i > maxN || total+l > maxBytes) {
+		tok := agent.EstimateMessageTokens(&msgs[i])
+		if start < len(msgs) && (len(msgs)-i > maxN || totalBytes+l > maxBytes || (maxTokens > 0 && totalTokens+tok > maxTokens)) {
 			break
 		}
-		total += l
+		totalBytes += l
+		totalTokens += tok
 		start = i
 	}
 	for start > 0 && msgs[start].Role == "tool" {

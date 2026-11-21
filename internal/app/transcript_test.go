@@ -22,7 +22,7 @@ func TestPruneEngineMsgsKeepsToolPairsAndStripsImages(t *testing.T) {
 		{Type: "text", Text: "图"},
 		{Type: "image_url", ImageURL: &llm.ImageURL{URL: "data:image/png;base64,AAAA"}},
 	}})
-	got := pruneEngineMsgs(msgs, 8, 1<<20)
+	got := pruneEngineMsgs(msgs, 8, 1<<20, 0)
 	if len(got) == 0 || len(got) > 10 {
 		t.Fatalf("裁剪后条数异常：%d", len(got))
 	}
@@ -40,13 +40,24 @@ func TestPruneEngineMsgsKeepsToolPairsAndStripsImages(t *testing.T) {
 	}
 }
 
+func TestPruneEngineMsgsCapsTokens(t *testing.T) {
+	msgs := make([]llm.Message, 0, 10)
+	for i := 0; i < 10; i++ {
+		msgs = append(msgs, llm.Message{Role: "user", Content: strings.Repeat("长上下文", 200)})
+	}
+	got := pruneEngineMsgs(msgs, 100, 1<<20, 1000)
+	if len(got) == 0 || len(got) >= len(msgs) {
+		t.Fatalf("按 token 裁剪结果异常：%d", len(got))
+	}
+}
+
 func TestPruneEngineMsgsCapsBytes(t *testing.T) {
 	msgs := []llm.Message{
 		{Role: "user", Content: strings.Repeat("a", 500)},
 		{Role: "assistant", Content: strings.Repeat("b", 500)},
 		{Role: "user", Content: strings.Repeat("c", 500)},
 	}
-	got := pruneEngineMsgs(msgs, 100, 700)
+	got := pruneEngineMsgs(msgs, 100, 700, 0)
 	if len(got) != 1 || got[0].Content != msgs[2].Content {
 		t.Fatalf("按字节裁剪结果异常：%d", len(got))
 	}

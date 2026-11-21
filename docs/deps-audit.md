@@ -1,4 +1,4 @@
-# 依赖审计（v1.39.7）
+# 依赖审计（v1.39.8）
 
 审计时间：2026-11-22
 工具：`go run ./cmd/depguard -json`、`go list -m all`、`go mod graph`

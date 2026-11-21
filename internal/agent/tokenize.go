@@ -74,3 +74,9 @@ func estimateMessagesTokens(msgs []llm.Message) int {
 	}
 	return total
 }
+
+// EstimateMessageTokens 是给 app 层会话持久化裁剪用的导出版本。
+func EstimateMessageTokens(m *llm.Message) int { return estimateMessageTokens(m) }
+
+// EstimateMessagesTokens 是给 app 层会话持久化裁剪用的导出版本。
+func EstimateMessagesTokens(msgs []llm.Message) int { return estimateMessagesTokens(msgs) }

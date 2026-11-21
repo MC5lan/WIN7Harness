@@ -607,7 +607,7 @@ func (a *App) settingsNetTab(p *settingsPane) {
 func (a *App) settingsBudgetTab(p *settingsPane) {
 	c, u := p.c, p.u
 	th := a.th
-	r := p.card("预算与限制", 398)
+	r := p.card("预算与限制", 420)
 	ix := r.X + 22
 	iy := r.Y + 50
 	iw := r.W - 44
@@ -659,7 +659,12 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 		px += 58
 	}
 	c.TextFace(px+6, iy+5, "大窗口选 300k/600k/960k；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	iy += 44
+	iy += 24
+	if cap := core.SuggestModelCapabilities(a.cfg.Provider().BaseURL, a.convModel()); cap.ContextWindow > 0 {
+		note := fmt.Sprintf("模型推测窗口：%dk（%s，仅供参考，不会自动覆盖）", cap.ContextWindow/1000, cap.Source)
+		c.TextFace(ix, iy, ellipsis(c, note, ui.FsXs, 400, iw), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	}
+	iy += 20
 
 	c.TextFace(ix, iy, "自定义单价（美元 / 百万 token）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	c.TextFace(ix+c.MeasureFace("自定义单价（美元 / 百万 token）", ui.FsXs, 500, ui.FaceUI)+14, iy,
