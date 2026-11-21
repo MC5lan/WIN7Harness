@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞（私下报告）
+    url: https://github.com/MC5lan/WIN7Harness/security/advisories/new
+    about: 不要开公开 Issue，请通过 Security Advisories 报告
+  - name: 使用说明与文档
+    url: https://github.com/MC5lan/WIN7Harness#文档
+    about: 先查使用说明、安装器与网络文档

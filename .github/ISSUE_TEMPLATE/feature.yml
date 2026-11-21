@@ -1,0 +1,60 @@
+name: 功能需求
+description: 描述场景与现有替代方案
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请优先描述**场景**，而不是直接给出实现方案。
+        与 Windows 7 SP1 兼容性、零运行时依赖冲突的需求会被拒绝。
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 需求场景
+      description: 你在什么环境下、想完成什么任务、现在卡在哪一步？
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: 现有替代方案
+      description: 目前你如何绕过这个问题？为什么不够用？
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及区域
+      options:
+        - 对话 / 工具
+        - 界面 / 交互
+        - 模型端点 / 网络
+        - 安装器 / 便携模式
+        - 更新 / 签名
+        - 文档
+        - 其他
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: 约束确认
+      options:
+        - label: 该需求不需要引入 CGO 或新的运行时依赖
+          required: true
+        - label: 该需求可在 Windows 7 SP1 上运行
+          required: true
+
+  - type: dropdown
+    id: willing
+    attributes:
+      label: 是否愿意提交 PR
+      options:
+        - 愿意
+        - 可以协助测试
+        - 暂不方便

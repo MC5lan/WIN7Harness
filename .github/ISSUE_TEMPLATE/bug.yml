@@ -1,0 +1,104 @@
+name: Bug 报告
+description: 报告可复现的问题（请先移除 API Key 与会话内容）
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告。请先确认：**不要粘贴 API Key、会话正文、完整 config.json**。
+        安全漏洞请走 [Security Advisories](https://github.com/MC5lan/WIN7Harness/security/advisories/new)，不要开公开 Issue。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 程序左下角或 `-version` 输出
+      placeholder: v1.38.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: arch
+    attributes:
+      label: 架构
+      options:
+        - amd64
+        - 386
+        - 不确定
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装模式
+      options:
+        - 标准安装（仅当前用户）
+        - 标准安装（所有用户）
+        - 便携模式（U 盘）
+        - 源码构建
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 版本与补丁
+      description: Win7 SP1 请列出已安装的 KB（如 KB2533623、KB4474419）
+      placeholder: Windows 7 SP1 x64 + KB2533623 + KB4474419
+    validations:
+      required: true
+
+  - type: input
+    id: endpoint
+    attributes:
+      label: 模型端点类型
+      description: 不需要填 Base URL 或 Key
+      placeholder: OpenCode Go / DeepSeek / Ollama / 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 1. 打开… 2. 点击… 3. 看到…
+      placeholder: |
+        1. 启动程序
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: /doctor 输出
+      description: 在输入框执行 `/doctor`，粘贴输出（已自动隐藏 Key）
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: crash
+    attributes:
+      label: /crash 报告路径（可选）
+      description: 如果程序崩溃或卡死，执行 `/crash` 后贴出生成的报告路径
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已移除 API Key、会话内容、代理凭据与敏感路径
+          required: true
+        - label: 这不是安全漏洞（安全漏洞走 Security Advisories）
+          required: true
