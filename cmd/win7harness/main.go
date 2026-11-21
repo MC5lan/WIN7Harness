@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"io"
 	"os"
+	"runtime"
 	"runtime/debug"
 
 	"win7harness/internal/app"
@@ -20,6 +21,12 @@ import (
 var buildTime = "dev"
 
 func main() {
+	// -version 必须在 COM/GUI/日志初始化之前处理：它要能在无桌面会话里直接返回。
+	if len(os.Args) == 2 && (os.Args[1] == "-version" || os.Args[1] == "--version") {
+		fmt.Println(versionString())
+		return
+	}
+
 	// 自定义绘制的窗口要响应 WM_GETOBJECT，oleacc 的 LresultFromObject
 	// 依赖当前线程初始化 COM（STA）；ShellExecute 也走同一套。
 	win32.CoInit()
@@ -153,6 +160,11 @@ func main() {
 	core.Logf("==== 退出，code=%d ====", code)
 	core.MarkCleanExit(code)
 	os.Exit(code)
+}
+
+// versionString 是 -version 的唯一输出格式，便于测试与脚本解析。
+func versionString() string {
+	return fmt.Sprintf("WIN7 Harness v%s (%s/%s, build %s)", core.Version, runtime.GOOS, runtime.GOARCH, buildTime)
 }
 
 // singleMutexName 用数据目录区分实例：便携版放在不同目录时可各开一个。

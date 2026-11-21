@@ -72,6 +72,24 @@ jobs:
           GOOS: windows
         run: go vet -unsafeptr=false ./...
 
+  meta:
+    name: meta
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: 版本号单一来源（非阻断）
+        run: |
+          SRC=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/core/config.go)
+          README=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' README.md | head -1 | sed 's/^v//')
+          CHANGELOG=$(grep -oE '^## \[[0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | head -1 | sed -E 's/^## \[//')
+          echo "core.Version=$SRC README=$README CHANGELOG=$CHANGELOG"
+          if [ "$SRC" != "$README" ]; then
+            echo "::warning title=README 版本与 core.Version 不一致::core.Version=$SRC README=$README"
+          fi
+          if [ "$SRC" != "$CHANGELOG" ]; then
+            echo "::warning title=CHANGELOG 版本与 core.Version 不一致::core.Version=$SRC CHANGELOG=$CHANGELOG"
+          fi
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
