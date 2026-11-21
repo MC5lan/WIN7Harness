@@ -217,14 +217,19 @@ func (e *Engine) Compact(ctx context.Context) (string, error) {
 }
 
 // compactTranscriptChars 是送给摘要模型的转录字符上限。
-// 取窗口的 3 倍字符但不超过 20 万，避免 32 位进程一次拼出超大字符串。
+// 64 位进程可放宽到 80 万字符，避免 960k 窗口压缩时只看得到一小段历史；
+// 32 位进程仍限制 20 万，防止拼接转录本身把地址空间打爆。
 func compactTranscriptChars(window int) int {
 	n := window * 3
 	if n < 40000 {
 		n = 40000
 	}
-	if n > 200000 {
-		n = 200000
+	limit := 800000
+	if strconv.IntSize == 32 {
+		limit = 200000
+	}
+	if n > limit {
+		n = limit
 	}
 	return n
 }

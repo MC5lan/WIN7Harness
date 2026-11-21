@@ -209,12 +209,18 @@ func (a *App) slashContext(rest string) bool {
 	}
 	msgs, chars, histTok, window, limit := a.eng.ContextInfo()
 	toolN, toolChars := a.eng.ToolDefsStats()
+	toolTokens := a.eng.ToolDefsTokens()
 	var b strings.Builder
 	b.WriteString("**上下文预算**（估算，实际以服务端 usage 为准）\n")
 	fmt.Fprintf(&b, "- 模型窗口 %s token · 自动压缩阈值 %s · 当前历史 %d 条 / %s 字符 / 约 %s token\n",
 		humanTokens(window), humanTokens(limit), msgs, core.HumanSize(int64(chars)), humanTokens(histTok))
 	if strconv.IntSize == 32 {
 		b.WriteString("- 当前是 32 位进程：压缩预算硬上限约 60k token，超大窗口只影响模型侧上限，不会按满窗口分配内存。\n")
+	}
+	sysTok := a.eng.PromptTokens()
+	if sysTok+toolTokens > limit {
+		fmt.Fprintf(&b, "⚠ 系统提示 + 工具定义约 %s token，已超过压缩预算 %s；历史只能保留很少几条，建议换更大窗口或 `/tools profile core`。\n",
+			humanTokens(sysTok+toolTokens), humanTokens(limit))
 	}
 	fmt.Fprintf(&b, "- 工具定义 %d 个 / %s 字符（profile=%s，计划模式=%v）\n",
 		toolN, core.HumanSize(int64(toolChars)), a.eng.EffectiveToolProfile(), a.eng.PlanMode)

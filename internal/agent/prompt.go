@@ -47,6 +47,9 @@ type PromptOptions struct {
 	Query string
 	// ContextWindow 用于按窗口收紧各段预算；0 按 128k。
 	ContextWindow int
+	// Minimal 用于系统提示+工具定义已经超预算时：暂时省略项目文档、技能索引和记忆，
+	// 先保证当前任务与安全规则能发出去；/context 会显示实际注入分段。
+	Minimal bool
 }
 
 const (
@@ -110,14 +113,18 @@ func buildPromptPlan(workDir string, opt PromptOptions) PromptPlan {
 		add("user", "用户全局指令", userInstructionBlock(cfg.SystemPrompt), "user", true, userBudget)
 	}
 
-	// S3 项目约定：仓库内文件，按 mtime 缓存的 Block；不可信项目内容。
-	add("project", "项目约定", projectDocBlock(workDir), "project", true, projectBudget)
+	// S3-S5 是可裁剪的项目资料：系统提示+工具已经超预算时优先省略，
+	// 保证安全规则和当前任务仍然发得出去。
+	if !opt.Minimal {
+		// S3 项目约定：仓库内文件，按 mtime 缓存的 Block；不可信项目内容。
+		add("project", "项目约定", projectDocBlock(workDir), "project", true, projectBudget)
 
-	// S4 技能索引：只列元数据，正文由 skill_use 按需加载。
-	add("skills", "技能索引", skills.Block(workDir), "mixed", true, skillBudget)
+		// S4 技能索引：只列元数据，正文由 skill_use 按需加载。
+		add("skills", "技能索引", skills.Block(workDir), "mixed", true, skillBudget)
 
-	// S5 项目记忆：模型生成的笔记，可能与现状不符。
-	add("memory", "项目记忆", memoryBlock(workDir), "model-notes", true, memoryBudget)
+		// S5 项目记忆：模型生成的笔记，可能与现状不符。
+		add("memory", "项目记忆", memoryBlock(workDir), "model-notes", true, memoryBudget)
+	}
 
 	// S6 稳定环境：工作目录、数据目录、配置/日志路径。同一会话稳定。
 	add("env", "运行环境", stableEnvBlock(workDir), "system", true, 0)
@@ -241,6 +248,17 @@ func (e *Engine) PromptTotal() int {
 	e.promptMu.Lock()
 	defer e.promptMu.Unlock()
 	return e.promptTotal
+}
+
+// PromptTokens 返回最近一次系统提示的估算 token 数。
+func (e *Engine) PromptTokens() int {
+	e.promptMu.Lock()
+	defer e.promptMu.Unlock()
+	total := 0
+	for _, s := range e.promptStats {
+		total += s.Tokens
+	}
+	return total
 }
 
 // ContextWindowValue 返回实际使用的上下文窗口（token）。

@@ -577,9 +577,6 @@ func (a *App) saveSettings() {
 		a.toast("生成中不能保存设置：先停止或等本轮结束", true)
 		return
 	}
-	if a.presetIdx >= 0 && a.presetIdx < len(a.cfg.Providers) {
-		a.cfg.ActiveProvider = a.presetIdx
-	}
 	base := strings.TrimSpace(a.ui.Field("set.base", "").String())
 	key := strings.TrimSpace(a.ui.Field("set.key", "").String())
 	model := strings.TrimSpace(a.ui.Field("set.model", "").String())
@@ -587,22 +584,26 @@ func (a *App) saveSettings() {
 	temp := a.ui.Field("set.temp", "").String()
 	mt := a.ui.Field("set.maxtok", "").String()
 
-	if base == "" || model == "" {
-		a.toast("接口地址与模型不能为空", true)
-		return
+	// 模型配置不完整时仍然保存外观/预算/网络等其它设置；
+	// 以前这里直接 return，用户只改主题或窗口也会被拦住，看起来像“设置没用”。
+	incompleteModel := base == "" || model == ""
+	if !incompleteModel {
+		if a.presetIdx >= 0 && a.presetIdx < len(a.cfg.Providers) {
+			a.cfg.ActiveProvider = a.presetIdx
+		}
+		if key != "" && !a.ensurePortablePassword(func() { a.saveSettings() }) {
+			return
+		}
+		p := a.cfg.Provider()
+		p.BaseURL = core.NormalizeBaseURL(base)
+		p.APIKey = key
+		p.Model = core.NormalizeModelID(p.BaseURL, model)
+		if fetched := a.modelsForBase(p.BaseURL); len(fetched) > 0 {
+			p.Models = append([]string{}, fetched...)
+		}
+		a.cfg.Providers[a.cfg.ActiveProvider] = p
+		a.cfg.Model = p.Model
 	}
-	if key != "" && !a.ensurePortablePassword(func() { a.saveSettings() }) {
-		return
-	}
-	p := a.cfg.Provider()
-	p.BaseURL = core.NormalizeBaseURL(base)
-	p.APIKey = key
-	p.Model = core.NormalizeModelID(p.BaseURL, model)
-	if fetched := a.modelsForBase(p.BaseURL); len(fetched) > 0 {
-		p.Models = append([]string{}, fetched...)
-	}
-	a.cfg.Providers[a.cfg.ActiveProvider] = p
-	a.cfg.Model = p.Model
 	if dir != "" {
 		if err := core.ValidateWorkDir(dir); err != nil {
 			a.toast(err.Error(), true)
@@ -682,7 +683,11 @@ func (a *App) saveSettings() {
 	}
 	a.rebuildEngine()
 	a.restoreHistory()
-	a.toast("设置已保存", false)
+	if incompleteModel {
+		a.toast("设置已保存；模型地址或模型 ID 不完整，未更新模型", true)
+	} else {
+		a.toast("设置已保存", false)
+	}
 	a.page = PageChat
 }
 

@@ -853,7 +853,9 @@ func friendlyErr(err error) string {
 }
 
 // buildPromptPlan 组装本轮系统提示，并记录分段统计供 /context 查看。
-func (e *Engine) buildPromptPlan() PromptPlan {
+func (e *Engine) buildPromptPlan() PromptPlan { return e.buildPromptPlanWith(false) }
+
+func (e *Engine) buildPromptPlanWith(minimal bool) PromptPlan {
 	name, body := e.activeSkillState()
 	opt := PromptOptions{
 		PlanMode:        e.PlanMode,
@@ -862,6 +864,7 @@ func (e *Engine) buildPromptPlan() PromptPlan {
 		ActiveSkillBody: body,
 		Query:           e.lastUserQuery(),
 		ContextWindow:   e.contextWindow(),
+		Minimal:         minimal,
 	}
 	if e.toolAllow != nil {
 		opt.AllowedTools = e.allowedToolList()
@@ -894,13 +897,20 @@ func (e *Engine) buildContext() []llm.Message {
 	e.mu.Unlock()
 
 	plan := e.buildPromptPlan()
+	// 先按完整资料组装；如果系统提示 + 工具定义已经超过压缩预算，
+	// 临时裁掉项目文档/技能索引/记忆，优先保证安全规则和当前任务能发出。
+	toolTokens := e.ToolDefsTokens()
+	if estimateTokens(plan.Text())+toolTokens > e.contextTokenLimit() {
+		plan = e.buildPromptPlanWith(true)
+		toolTokens = e.ToolDefsTokens()
+	}
 	sys := llm.Message{Role: "system", Content: plan.Text()}
 	out := []llm.Message{sys}
 
 	// 预算按 token 算，而不是按字符。系统提示本身也计入，避免“系统提示已经超窗、
 	// 却还硬塞最后两条消息”的旧问题。
 	budget := e.contextTokenLimit()
-	total := estimateTokens(sys.Content) + e.ToolDefsTokens() + 2
+	total := estimateTokens(sys.Content) + toolTokens + 2
 	start := len(hist)
 	for i := len(hist) - 1; i >= 0; i-- {
 		l := estimateMessageTokens(&hist[i])
