@@ -94,13 +94,36 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 	if len(patches) == 0 {
 		return Result{}, fmt.Errorf("补丁里没有任何 *** Update File / *** Add File 段落")
 	}
-
-	// 逐段审阅：先给全补丁里的每一段改动编号，再按 hunks 参数筛掉不要的段。
 	catalog := hunkCatalog(patches)
+
+	patches, early, err := selectPatchHunks(args, patches, catalog)
+	if err != nil {
+		return Result{}, err
+	}
+	if early != nil {
+		return *early, nil
+	}
+
+	patches, uiConfirmed, err := confirmPatchSelection(ctx, dry, patches)
+	if err != nil {
+		return Result{}, err
+	}
+
+	previews, writes, changed, err := buildPatchWrites(ctx, patches)
+	if err != nil {
+		return Result{}, err
+	}
+
+	return commitPatchWrites(ctx, dry, catalog, previews, writes, changed, uiConfirmed)
+}
+
+// selectPatchHunks 按 hunks 参数筛选补丁段落。early 非空表示无需继续写盘。
+func selectPatchHunks(args map[string]interface{}, patches []filePatch, catalog hunkCatalogT) ([]filePatch, *Result, error) {
+	// 逐段审阅：先给全补丁里的每一段改动编号，再按 hunks 参数筛掉不要的段。
 	if selText := strings.TrimSpace(Get(args, "hunks")); selText != "" {
 		keep, perr := parseHunkSel(selText, len(catalog.refs))
 		if perr != nil {
-			return Result{}, perr
+			return nil, nil, perr
 		}
 		filtered := make([]filePatch, len(patches))
 		for i := range patches {
@@ -128,13 +151,17 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 			}
 		}
 		if len(patches) == 0 {
-			return Result{Output: fmt.Sprintf("选中的 %d 段改动都不存在或被跳过，未写盘。\n\n段落清单：\n%s", selected, catalog.text())}, nil
+			return nil, &Result{Output: fmt.Sprintf("选中的 %d 段改动都不存在或被跳过，未写盘。\n\n段落清单：\n%s", selected, catalog.text())}, nil
 		}
 	}
+	return patches, nil, nil
+}
 
+// confirmPatchSelection 把补丁段落交给 UI 逐段审阅，返回过滤后的补丁。
+func confirmPatchSelection(ctx *Context, dry bool, patches []filePatch) ([]filePatch, bool, error) {
+	uiConfirmed := false
 	// 界面逐段审阅：把每段补丁的真实差异交给 UI，用户可单独接受/拒绝。
 	// 这里复用上面模型的 hunks 筛选逻辑——把用户选中的段落重新过滤一遍即可。
-	uiConfirmed := false
 	if ctx.ConfirmDiff != nil && !dry {
 		remaining := hunkCatalog(patches)
 		if len(remaining.refs) > 0 {
@@ -163,7 +190,7 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 			}
 			accepted := ctx.ConfirmDiff("应用补丁前确认（逐段审阅）", "补丁", uiHunks, true)
 			if accepted == nil {
-				return Result{}, fmt.Errorf("用户取消了补丁，本次补丁全部未生效")
+				return nil, false, fmt.Errorf("用户取消了补丁，本次补丁全部未生效")
 			}
 			keep := make([]bool, len(remaining.refs))
 			for _, i := range accepted {
@@ -190,34 +217,33 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 			uiConfirmed = true
 		}
 	}
+	return patches, uiConfirmed, nil
+}
 
+// buildPatchWrites 校验路径与内容，生成待写文件与预览。
+func buildPatchWrites(ctx *Context, patches []filePatch) ([]string, []patchWrite, int, error) {
 	var previews []string
-	type writeItem struct {
-		path string
-		text string
-		meta textMeta
-	}
-	var writes []writeItem
+	var writes []patchWrite
 	changed := 0
 
 	for _, fp := range patches {
 		p := core.ResolvePath(ctx.WorkDir, fp.path)
 		if err := core.ValidateWindowsPathSyntax(p); err != nil {
-			return Result{}, err
+			return nil, nil, 0, err
 		}
 		if other, ok := core.CaseInsensitiveCollision(p); ok {
-			return Result{}, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写", other)
+			return nil, nil, 0, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写", other)
 		}
 		if core.IsForbiddenPath(p) {
-			return Result{}, fmt.Errorf("拒绝修改系统保护目录: %s", p)
+			return nil, nil, 0, fmt.Errorf("拒绝修改系统保护目录: %s", p)
 		}
 		if err := guardEscapes(ctx, p, "修改"); err != nil {
-			return Result{}, err
+			return nil, nil, 0, err
 		}
 
 		if fp.add {
 			if _, serr := os.Stat(p); serr == nil {
-				return Result{}, fmt.Errorf("%s 已存在，改用 *** Update File 修改它", p)
+				return nil, nil, 0, fmt.Errorf("%s 已存在，改用 *** Update File 修改它", p)
 			}
 			var buf []string
 			for _, h := range fp.hunks {
@@ -239,7 +265,7 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 				meta.EOL = detectEOL(normalizeForMatch(text))
 			}
 			previews = append(previews, core.UnifiedDiff("", normalizeForMatch(text), fp.path+"（新建）", 3))
-			writes = append(writes, writeItem{p, text, meta})
+			writes = append(writes, patchWrite{p, text, meta})
 			changed++
 			continue
 		}
@@ -247,23 +273,27 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 		oldText, meta, rerr := readTextFile(p)
 		if rerr != nil {
 			if errors.Is(rerr, errBinaryText) {
-				return Result{}, fmt.Errorf("%s 是二进制文件，apply_patch 只支持文本", filepath.Base(p))
+				return nil, nil, 0, fmt.Errorf("%s 是二进制文件，apply_patch 只支持文本", filepath.Base(p))
 			}
-			return Result{}, fmt.Errorf("读取失败 %s: %v", p, rerr)
+			return nil, nil, 0, fmt.Errorf("读取失败 %s: %v", p, rerr)
 		}
 		newText, aerr := applyHunks(oldText, fp.hunks)
 		if aerr != nil {
-			return Result{}, fmt.Errorf("%s: %v", fp.path, aerr)
+			return nil, nil, 0, fmt.Errorf("%s: %v", fp.path, aerr)
 		}
 		if newText == oldText {
 			previews = append(previews, fp.path+"：补丁未产生任何变化\n")
 			continue
 		}
 		previews = append(previews, core.UnifiedDiff(normalizeForMatch(oldText), normalizeForMatch(newText), fp.path, 3))
-		writes = append(writes, writeItem{p, newText, meta})
+		writes = append(writes, patchWrite{p, newText, meta})
 		changed++
 	}
+	return previews, writes, changed, nil
+}
 
+// commitPatchWrites 全量编码、确认、写盘，失败时回滚已写文件。
+func commitPatchWrites(ctx *Context, dry bool, catalog hunkCatalogT, previews []string, writes []patchWrite, changed int, uiConfirmed bool) (Result, error) {
 	summary := strings.Join(previews, "\n")
 	head := catalog.text()
 	if dry {
@@ -337,6 +367,12 @@ func runApplyPatch(ctx *Context, args map[string]interface{}) (Result, error) {
 		Output: fmt.Sprintf("补丁已应用，共写入 %d 个文件：\n- %s\n\n%s",
 			len(done), strings.Join(done, "\n- "), summary),
 	}, nil
+}
+
+type patchWrite struct {
+	path string
+	text string
+	meta textMeta
 }
 
 // parsePatch 把补丁文本解析为按文件分组的改动列表。
