@@ -256,6 +256,18 @@ func RunWindow(title string, width, height int32, app App) int {
 		// 第一次节拍再补一次，不在这里死等。
 		core.Logf("!! 窗口同步显示未生效，将在首个节拍重试")
 	}
+	code := w.runMessageLoop(hwnd)
+	appMu.Lock()
+	delete(appByWnd, uintptr(hwnd))
+	appMu.Unlock()
+	if w.canvas != nil {
+		w.canvas.Dispose()
+	}
+	return code
+}
+
+// runMessageLoop 运行窗口消息循环，返回 WM_QUIT 的退出码。
+func (w *Window) runMessageLoop(hwnd win32.HWND) int {
 	// 消息循环：有消息就立即处理；空闲时用 MsgWaitForMultipleObjectsEx
 	// 等消息或下一节拍，不再 PeekMessage + Sleep(8ms) 每秒空转 100 次。
 	// 不依赖 SetTimer：启动测试里它曾“返回成功但 WM_TIMER 永不到达”。
@@ -326,13 +338,6 @@ func RunWindow(title string, width, height int32, app App) int {
 			interval = 30 * time.Millisecond
 		}
 		nextTick = time.Now().Add(interval)
-	}
-
-	appMu.Lock()
-	delete(appByWnd, uintptr(hwnd))
-	appMu.Unlock()
-	if w.canvas != nil {
-		w.canvas.Dispose()
 	}
 	return int(msg.WParam)
 }

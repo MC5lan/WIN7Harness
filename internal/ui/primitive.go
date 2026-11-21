@@ -83,15 +83,7 @@ func Resolve(kind ComponentKind, s State) Style {
 	// 禁用态统一：底色退到表面色，文字退到三级文字色。
 	// 不用半透明降亮度——软光栅上半透明文本会发灰发糊。
 	if s == StateDisabled {
-		switch kind {
-		case KindButtonPrimary, KindButtonDanger:
-			return Style{Fill: tk.BGSurface, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
-		case KindButtonSecondary, KindInput, KindSelect, KindTextarea:
-			return Style{Fill: tk.BGSurfaceSunken, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
-		case KindButtonGhost:
-			return Style{Fill: 0, Border: 0, Text: tk.TextTertiary}
-		}
-		return Style{Fill: tk.BGSurface, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
+		return resolveDisabled(kind, tk)
 	}
 
 	switch kind {
@@ -230,6 +222,19 @@ func Resolve(kind ComponentKind, s State) Style {
 		return Style{Fill: tk.BGSurfaceRaise, Border: tk.StateDanger, Text: tk.TextPrimary, BorderWidth: 1}
 	}
 	return Style{Fill: tk.BGSurface, Border: tk.BorderHairline, Text: tk.TextPrimary, BorderWidth: 1}
+}
+
+// resolveDisabled 返回禁用态样式：底色退到表面色，文字退到三级文字色。
+func resolveDisabled(kind ComponentKind, tk Tokens) Style {
+	switch kind {
+	case KindButtonPrimary, KindButtonDanger:
+		return Style{Fill: tk.BGSurface, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
+	case KindButtonSecondary, KindInput, KindSelect, KindTextarea:
+		return Style{Fill: tk.BGSurfaceSunken, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
+	case KindButtonGhost:
+		return Style{Fill: 0, Border: 0, Text: tk.TextTertiary}
+	}
+	return Style{Fill: tk.BGSurface, Border: tk.BorderHairline, Text: tk.TextTertiary, BorderWidth: 1}
 }
 
 // blendColor 是包内取色混合（COLORREF 分通道线性插值）。

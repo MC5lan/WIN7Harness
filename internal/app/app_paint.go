@@ -214,6 +214,13 @@ func (a *App) paintChat(c *ui.Canvas) {
 	// 反而按 cw 排版会把一整排按钮挤到侧栏上，和标题叠字。
 	topW := a.chatW
 
+	a.paintChatHeader(c, u, mx, topW, topH, H)
+	a.paintChatBody(c, u, mx, cw, topH, H)
+}
+
+// paintChatHeader 绘制顶栏、会话标题、状态与操作按钮。
+func (a *App) paintChatHeader(c *ui.Canvas, u *UI, mx, topW, topH, H int32) {
+	th := a.th
 	// 顶栏
 	c.FillRect(ui.R(mx, 0, a.chatW, topH), ui.Blend(th.Bg, th.Surface, 0.6))
 	c.HLine(mx, topH-1, a.chatW, th.Border)
@@ -307,7 +314,11 @@ func (a *App) paintChat(c *ui.Canvas) {
 		a.editReset()
 		a.openDirMenu(wcR, false)
 	}
+}
 
+// paintChatBody 绘制消息区、输入区、检查器、rail 与抽屉浮层。
+func (a *App) paintChatBody(c *ui.Canvas, u *UI, mx, cw, topH, H int32) {
+	th := a.th
 	// Rail 挪到最后一层画（见下方调用处）。
 
 	// 会话列表：内嵌态现在画（占位、和主区并排）；

@@ -5,18 +5,26 @@ import "fmt"
 // generatedTasks 是不依赖 testdata 目录、直接用内存 fixture 生成的工程任务。
 // 目标是让 bench 覆盖：Unicode、数值、边界、解析、跨文件、错误链、路径、
 // 排序稳定性、上下文取消、CSV、缓存过期等常见工程缺陷。
+const generatedCommon = "你在一个临时 Go 模块里修一个失败测试。先运行 `go test ./...` 看失败原因；" +
+	"只改非测试源文件，不要修改任何 *_test.go、go.mod 或 go.sum；" +
+	"改完再运行 `go test ./...` 确认通过。最后用一句话说明改了什么。"
+
+func generatedTask(id, name, job string, files map[string]string) Task {
+	files["go.mod"] = "module " + id + "\n\ngo 1.20\n"
+	return Task{ID: id, Name: name, Prompt: generatedCommon + "\n\n任务：" + job, Files: files}
+}
+
 func generatedTasks() []Task {
-	common := "你在一个临时 Go 模块里修一个失败测试。先运行 `go test ./...` 看失败原因；" +
-		"只改非测试源文件，不要修改任何 *_test.go、go.mod 或 go.sum；" +
-		"改完再运行 `go test ./...` 确认通过。最后用一句话说明改了什么。"
+	tasks := generatedTasks1()
+	tasks = append(tasks, generatedTasks2()...)
+	tasks = append(tasks, generatedTasks3()...)
+	tasks = append(tasks, generatedTasks4()...)
+	return tasks
+}
 
-	mk := func(id, name, job string, files map[string]string) Task {
-		files["go.mod"] = "module " + id + "\n\ngo 1.20\n"
-		return Task{ID: id, Name: name, Prompt: common + "\n\n任务：" + job, Files: files}
-	}
-
+func generatedTasks1() []Task {
 	return []Task{
-		mk("runerev", "Unicode 反转", "让 Reverse 按 Unicode 字符反转，而不是按字节。", map[string]string{
+		generatedTask("runerev", "Unicode 反转", "让 Reverse 按 Unicode 字符反转，而不是按字节。", map[string]string{
 			"rev.go": `package runerev
 
 func Reverse(s string) string {
@@ -39,7 +47,7 @@ func TestReverseUnicode(t *testing.T) {
 `,
 		}),
 
-		mk("avgfloat", "平均值精度", "让 Mean 返回正确的浮点平均值，不要先做整数除法。", map[string]string{
+		generatedTask("avgfloat", "平均值精度", "让 Mean 返回正确的浮点平均值，不要先做整数除法。", map[string]string{
 			"mean.go": `package avgfloat
 
 func Mean(xs []int) float64 {
@@ -65,7 +73,7 @@ func TestMean(t *testing.T) {
 `,
 		}),
 
-		mk("clamp", "区间夹取", "让 Clamp 同时处理下界和上界。", map[string]string{
+		generatedTask("clamp", "区间夹取", "让 Clamp 同时处理下界和上界。", map[string]string{
 			"clamp.go": `package clamp
 
 func Clamp(v, lo, hi int) int {
@@ -87,7 +95,7 @@ func TestClampHigh(t *testing.T) {
 `,
 		}),
 
-		mk("parsebool", "布尔解析", "让 Parse 接受 yes/on/no/off（大小写不敏感），非法值返回错误。", map[string]string{
+		generatedTask("parsebool", "布尔解析", "让 Parse 接受 yes/on/no/off（大小写不敏感），非法值返回错误。", map[string]string{
 			"parse.go": `package parsebool
 
 import (
@@ -124,7 +132,7 @@ func TestParseWords(t *testing.T) {
 `,
 		}),
 
-		mk("mapmerge", "配置合并不污染入参", "让 Merge 返回新 map，不修改 base；override 的同名键覆盖 base。", map[string]string{
+		generatedTask("mapmerge", "配置合并不污染入参", "让 Merge 返回新 map，不修改 base；override 的同名键覆盖 base。", map[string]string{
 			"config.go": `package mapmerge
 
 type Config struct {
@@ -154,8 +162,12 @@ func TestMergeDoesNotMutateBase(t *testing.T) {
 }
 `,
 		}),
+	}
+}
 
-		mk("svcmiss", "服务层错误传播", "让 Lookup 在 Store 找不到 id 时返回错误，不能静默返回空串。", map[string]string{
+func generatedTasks2() []Task {
+	return []Task{
+		generatedTask("svcmiss", "服务层错误传播", "让 Lookup 在 Store 找不到 id 时返回错误，不能静默返回空串。", map[string]string{
 			"store/store.go": `package store
 
 type Store interface {
@@ -194,7 +206,7 @@ func TestLookupMissing(t *testing.T) {
 `,
 		}),
 
-		mk("http404", "HTTP 未命中返回 404", "让 Handler 在 id 不存在时返回 404，不要返回 200 + 空用户。", map[string]string{
+		generatedTask("http404", "HTTP 未命中返回 404", "让 Handler 在 id 不存在时返回 404，不要返回 200 + 空用户。", map[string]string{
 			"handler.go": `package http404
 
 import (
@@ -230,7 +242,7 @@ func TestMissingUser404(t *testing.T) {
 `,
 		}),
 
-		mk("paging", "分页偏移", "让 Offset 使用 1-based 页码：第 1 页偏移 0，第 3 页偏移 20（size=10）。", map[string]string{
+		generatedTask("paging", "分页偏移", "让 Offset 使用 1-based 页码：第 1 页偏移 0，第 3 页偏移 20（size=10）。", map[string]string{
 			"page.go": `package paging
 
 func Offset(page, size int) int {
@@ -258,7 +270,7 @@ func TestOffset(t *testing.T) {
 `,
 		}),
 
-		mk("retrymax", "重试次数", "让 MaxAttempts(3) 返回 3；n<=0 时返回 0。", map[string]string{
+		generatedTask("retrymax", "重试次数", "让 MaxAttempts(3) 返回 3；n<=0 时返回 0。", map[string]string{
 			"retry.go": `package retrymax
 
 func MaxAttempts(n int) int {
@@ -279,8 +291,12 @@ func TestMaxAttempts(t *testing.T) {
 }
 `,
 		}),
+	}
+}
 
-		mk("ttlcache", "缓存过期", "让 Get 在 now 不早于 Expires 时返回未命中。", map[string]string{
+func generatedTasks3() []Task {
+	return []Task{
+		generatedTask("ttlcache", "缓存过期", "让 Get 在 now 不早于 Expires 时返回未命中。", map[string]string{
 			"cache.go": `package ttlcache
 
 import "time"
@@ -325,7 +341,7 @@ func TestExpiredMiss(t *testing.T) {
 `,
 		}),
 
-		mk("errwrap", "错误链可判断", "让 Wrap 使用 %w 包装 ErrNotFound，使 errors.Is 成立。", map[string]string{
+		generatedTask("errwrap", "错误链可判断", "让 Wrap 使用 %w 包装 ErrNotFound，使 errors.Is 成立。", map[string]string{
 			"errs.go": `package errwrap
 
 import (
@@ -354,7 +370,7 @@ func TestErrorsIs(t *testing.T) {
 `,
 		}),
 
-		mk("pathjoin", "Windows 路径拼接", "让 Join 使用平台路径分隔符并清理多余分隔符，与 filepath.Join 一致。", map[string]string{
+		generatedTask("pathjoin", "Windows 路径拼接", "让 Join 使用平台路径分隔符并清理多余分隔符，与 filepath.Join 一致。", map[string]string{
 			"path.go": `package pathjoin
 
 import "strings"
@@ -380,7 +396,7 @@ func TestJoinMatchesFilepath(t *testing.T) {
 `,
 		}),
 
-		mk("stablesort", "稳定排序", "让 Sort 在 Key 相同时保持原始顺序，使用稳定排序。", map[string]string{
+		generatedTask("stablesort", "稳定排序", "让 Sort 在 Key 相同时保持原始顺序，使用稳定排序。", map[string]string{
 			"sort.go": `package stablesort
 
 import "sort"
@@ -426,8 +442,12 @@ func TestStable(t *testing.T) {
 }
 `,
 		}),
+	}
+}
 
-		mk("cancel", "上下文取消", "让 Run 在 ctx 取消后停止，不再继续调用 fn。", map[string]string{
+func generatedTasks4() []Task {
+	return []Task{
+		generatedTask("cancel", "上下文取消", "让 Run 在 ctx 取消后停止，不再继续调用 fn。", map[string]string{
 			"worker.go": `package cancel
 
 import "context"
@@ -461,7 +481,7 @@ func TestCancel(t *testing.T) {
 `,
 		}),
 
-		mk("csvparse", "CSV 引号", "让 Parse 正确处理带引号字段里的逗号，例如 a,\"b,c\",d。", map[string]string{
+		generatedTask("csvparse", "CSV 引号", "让 Parse 正确处理带引号字段里的逗号，例如 a,\"b,c\",d。", map[string]string{
 			"parse.go": `package csvparse
 
 import "strings"
@@ -487,9 +507,9 @@ func TestQuotedComma(t *testing.T) {
 `,
 		}),
 
-		mk("longhorizon", "10 包长链路修复", "p01~p10 十个包的 Value 都应返回自己的编号；逐个修好，不要改测试。", longHorizonFiles()),
+		generatedTask("longhorizon", "10 包长链路修复", "p01~p10 十个包的 Value 都应返回自己的编号；逐个修好，不要改测试。", longHorizonFiles()),
 
-		mk("refactor", "10 文件重命名重构", "把 calc 包的 Old 重命名为 Compute，并更新 use01~use10 的全部调用点；不要改测试。", refactorFiles()),
+		generatedTask("refactor", "10 文件重命名重构", "把 calc 包的 Old 重命名为 Compute，并更新 use01~use10 的全部调用点；不要改测试。", refactorFiles()),
 	}
 }
 

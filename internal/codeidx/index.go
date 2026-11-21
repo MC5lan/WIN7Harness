@@ -295,40 +295,7 @@ func Build(root string, prev *Index) *Index {
 		}
 	}
 
-	var files []string
-	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
-		if err != nil || p == root {
-			return nil
-		}
-		if info.IsDir() {
-			if skipDirs[info.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if len(files) >= fileLimit {
-			ix.Truncated = true
-			return errStopWalk
-		}
-		ext := strings.ToLower(filepath.Ext(p))
-		if !goExt[ext] && !genericExt[ext] {
-			return nil
-		}
-		if info.Size() > maxFileSz {
-			return nil
-		}
-		rel, rerr := filepath.Rel(root, p)
-		if rerr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		files = append(files, rel)
-		ix.Files[rel] = info.ModTime().UnixNano()
-		ix.Sizes[rel] = info.Size()
-		return nil
-	})
-	sort.Strings(files)
-
+	files := scanIndexFiles(root, ix, fileLimit)
 	dirty := takeDirty()
 	st := BuildStats{Total: len(files), Incremental: prev != nil}
 	// 峰值控制的第一招：所有文件都没变化时直接复用上一份快照。
@@ -434,6 +401,44 @@ func Build(root string, prev *Index) *Index {
 		return ix.Syms[i].Line < ix.Syms[j].Line
 	})
 	return ix
+}
+
+// scanIndexFiles 遍历 root，返回按路径排序的候选源文件。
+func scanIndexFiles(root string, ix *Index, fileLimit int) []string {
+	var files []string
+	_ = filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
+		if err != nil || p == root {
+			return nil
+		}
+		if info.IsDir() {
+			if skipDirs[info.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if len(files) >= fileLimit {
+			ix.Truncated = true
+			return errStopWalk
+		}
+		ext := strings.ToLower(filepath.Ext(p))
+		if !goExt[ext] && !genericExt[ext] {
+			return nil
+		}
+		if info.Size() > maxFileSz {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, p)
+		if rerr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		files = append(files, rel)
+		ix.Files[rel] = info.ModTime().UnixNano()
+		ix.Sizes[rel] = info.Size()
+		return nil
+	})
+	sort.Strings(files)
+	return files
 }
 
 // sameFileSet 判断 prev 与 next 的文件集合、mtime、大小是否完全一致。

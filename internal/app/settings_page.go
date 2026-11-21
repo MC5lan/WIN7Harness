@@ -256,7 +256,12 @@ func (a *App) settingsModelTab(p *settingsPane) {
 		f.Masked = !f.Masked
 	}
 	iy += 44
+	a.settingsModelBottom(c, u, ix, iw, iy)
+}
 
+// settingsModelBottom 绘制便携密钥状态、模型 ID、工作目录与测试按钮。
+func (a *App) settingsModelBottom(c *ui.Canvas, u *UI, ix, iw, iy int32) {
+	th := a.th
 	// 便携模式：U 盘密码状态。没解锁时给一个入口，不强迫用户去猜。
 	if a.runMode == "便携" {
 		if core.PortableSecretsLocked() {
@@ -339,14 +344,13 @@ func (a *App) settingsModelTab(p *settingsPane) {
 
 	if u.Button("set.test", "测试连接", ui.R(ix, iy, 96, 32), BtnSubtle) {
 		a.testConnection(strings.TrimSpace(u.Field("set.base", "").String()),
-			strings.TrimSpace(f.String()), strings.TrimSpace(u.Field("set.model", "").String()))
+			strings.TrimSpace(u.Field("set.key", "").String()), strings.TrimSpace(u.Field("set.model", "").String()))
 	}
 	if u.Button("set.doctor", "诊断", ui.R(ix+104, iy, 64, 32), BtnGhost) {
 		a.cmdDoctorForm()
 	}
 	c.TextFace(ix+180, iy+8, ellipsis(c, "测试会发一条最短对话（约几个 token）；诊断会测 /models、对话和工具", ui.FsXs, 400, iw-180), ui.FsXs, 400, th.TextMute, ui.FaceUI)
 }
-
 func (a *App) settingsLookTab(p *settingsPane) {
 	c, u := p.c, p.u
 	th := a.th

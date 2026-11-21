@@ -143,6 +143,26 @@ func (a *App) onEvent(ev agent.Event) {
 	conv := a.currentConv()
 	m := a.streamMsg()
 	switch ev.Kind {
+	case "content", "reasoning", "tool_start", "tool_end":
+		a.onStreamEvent(ev, m)
+	case "turn_end":
+		a.onTurnEnd(ev, conv, m)
+	case "error":
+		a.onErrorEvent(ev, m)
+	case "status":
+		a.onStatusEvent(ev, m)
+	case "plan", "notice", "budget":
+		a.onMiscEvent(ev, m)
+	}
+	a.ver++
+	if a.autoScroll {
+		a.scrollToBottom()
+	}
+}
+
+// onStreamEvent 处理正文、思考与工具卡片流式事件。
+func (a *App) onStreamEvent(ev agent.Event, m *Message) {
+	switch ev.Kind {
 	case "content":
 		if m == nil {
 			m = a.newAssistantMsg()
@@ -202,73 +222,88 @@ func (a *App) onEvent(ev agent.Event) {
 			a.lastDisk = time.Now()
 			a.saveConv()
 		}
-	case "turn_end":
-		a.streaming = false
+	}
+}
+
+// onTurnEnd 处理一轮正常结束。
+func (a *App) onTurnEnd(ev agent.Event, conv *Conv, m *Message) {
+	a.streaming = false
+	a.retryBackup = nil
+	a.observeTurn(true)
+	// 最后一条消息从“流式”切成“完成”，高度/操作条都会变；强制整帧
+	// 重绘，避免脏区算法在收尾这一帧留下空白带。
+	a.forceFull = true
+	if m != nil {
+		m.Streaming = false
+		fmt.Sscanf(ev.Text, "%d", &m.Tokens)
+		if conv != nil {
+			conv.Tok += m.Tokens
+		}
+	}
+	a.curAsst = -1
+	a.autoScroll = true
+	a.saveConv()
+	// 轮次正常结束：删掉恢复日志，下次启动不会再提示。
+	a.journalFinish()
+	// 人去干别的了才弹气泡；窗口就在眼前时气泡只会挡路。
+	if a.w != nil && win32.ForegroundWindow() != a.w.Hwnd() {
+		tail := ""
+		if m != nil {
+			tail = oneLine(lastTextLine(m.Text))
+		}
+		a.notify("回答已完成", tail, false)
+	}
+}
+
+// onErrorEvent 处理失败终态。
+func (a *App) onErrorEvent(ev agent.Event, m *Message) {
+	a.forceFull = true
+	if m != nil {
+		m.Err = ev.Text
+		m.Streaming = false
+	} else {
+		a.msgs = append(a.msgs, Message{Role: "assistant", Err: ev.Text, At: time.Now()})
+	}
+	a.streaming = false
+	a.observeTurn(false)
+	a.curAsst = -1
+	// 重试二次失败时把旧回复放回去，不让用户丢失上一条答案。
+	if a.retryBackup != nil {
+		a.msgs = append(a.msgs, *a.retryBackup)
 		a.retryBackup = nil
-		a.observeTurn(true)
-		// 最后一条消息从“流式”切成“完成”，高度/操作条都会变；强制整帧
-		// 重绘，避免脏区算法在收尾这一帧留下空白带。
-		a.forceFull = true
-		if m != nil {
-			m.Streaming = false
-			fmt.Sscanf(ev.Text, "%d", &m.Tokens)
-			if conv != nil {
-				conv.Tok += m.Tokens
-			}
-		}
-		a.curAsst = -1
-		a.autoScroll = true
-		a.saveConv()
-		// 轮次正常结束：删掉恢复日志，下次启动不会再提示。
-		a.journalFinish()
-		// 人去干别的了才弹气泡；窗口就在眼前时气泡只会挡路。
-		if a.w != nil && win32.ForegroundWindow() != a.w.Hwnd() {
-			tail := ""
-			if m != nil {
-				tail = oneLine(lastTextLine(m.Text))
-			}
-			a.notify("回答已完成", tail, false)
-		}
-	case "error":
-		a.forceFull = true
-		if m != nil {
-			m.Err = ev.Text
-			m.Streaming = false
-		} else {
-			a.msgs = append(a.msgs, Message{Role: "assistant", Err: ev.Text, At: time.Now()})
-		}
+	}
+	a.saveConv()
+	// 出错也是明确的结束状态，保留日志只会让用户以为还能续做。
+	a.journalFinish()
+	a.toast(ev.Text, true)
+	// 失败自动留证据：诊断包里有脱敏配置、环境与最近日志，
+	// 用户报问题时直接给这一个文件，不用再问"你什么系统什么模型"。
+	if p := a.autoDiag(ev.Text); p != "" {
+		a.notify("任务失败，已生成诊断包", oneLine(ev.Text), true)
+	} else {
+		a.notify("任务失败", oneLine(ev.Text), true)
+	}
+}
+
+// onStatusEvent 处理状态栏与停止终态。
+func (a *App) onStatusEvent(ev agent.Event, m *Message) {
+	a.statusMsg = ev.Text
+	// 引擎侧停止只发 status，这里兜住终态，避免界面卡在"生成中"。
+	if ev.Text == "已停止" {
 		a.streaming = false
-		a.observeTurn(false)
+		a.forceFull = true
 		a.curAsst = -1
-		// 重试二次失败时把旧回复放回去，不让用户丢失上一条答案。
-		if a.retryBackup != nil {
-			a.msgs = append(a.msgs, *a.retryBackup)
-			a.retryBackup = nil
+		if m != nil {
+			m.Streaming = false
 		}
-		a.saveConv()
-		// 出错也是明确的结束状态，保留日志只会让用户以为还能续做。
 		a.journalFinish()
-		a.toast(ev.Text, true)
-		// 失败自动留证据：诊断包里有脱敏配置、环境与最近日志，
-		// 用户报问题时直接给这一个文件，不用再问"你什么系统什么模型"。
-		if p := a.autoDiag(ev.Text); p != "" {
-			a.notify("任务失败，已生成诊断包", oneLine(ev.Text), true)
-		} else {
-			a.notify("任务失败", oneLine(ev.Text), true)
-		}
-	case "status":
-		a.statusMsg = ev.Text
-		// 引擎侧停止只发 status，这里兜住终态，避免界面卡在"生成中"。
-		if ev.Text == "已停止" {
-			a.streaming = false
-			a.forceFull = true
-			a.curAsst = -1
-			if m != nil {
-				m.Streaming = false
-			}
-			a.journalFinish()
-			a.saveConv()
-		}
+		a.saveConv()
+	}
+}
+
+// onMiscEvent 处理方案、通知与预算护栏。
+func (a *App) onMiscEvent(ev agent.Event, m *Message) {
+	switch ev.Kind {
 	case "plan":
 		// 审批闸门已由引擎的 PlanApprove 回调接管：事件到达时弹窗通常已经（或即将）挂起。
 		// 这里只更新状态栏，绝不再覆写 a.input——那会把用户正在打的字吃掉。
@@ -290,10 +325,6 @@ func (a *App) onEvent(ev agent.Event) {
 		a.saveConv()
 		a.journalFinish()
 		a.toast("已触发预算护栏，停止继续调用模型", true)
-	}
-	a.ver++
-	if a.autoScroll {
-		a.scrollToBottom()
 	}
 }
 

@@ -137,7 +137,6 @@ func (a *App) paintOnboardBrand(c *ui.Canvas, cb ui.Rect) {
 // paintOnboardForm 绘制首次启动页右侧连接配置卡片。
 func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 	th := a.th
-	u := a.ui
 	x := card.X + 28
 	iw := card.W - 56
 	yy := card.Y + 24
@@ -149,7 +148,19 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 	yy += 34
 	c.TextFace(x, yy, "选择一个接入方式，或直接填任意 OpenAI 兼容地址。", ui.FsSm, 400, th.TextDim, ui.FaceUI)
 	yy += 26
+	yy = a.paintOnboardPresets(c, x, iw, yy)
+	yy = a.paintOnboardFields(c, x, iw, yy)
+	yy = a.paintOnboardWorkDir(c, x, iw, yy)
+	a.paintOnboardFooter(c, card, x, iw, yy)
 
+	// 键盘：Tab 切焦点
+	_ = win32.VK_TAB
+}
+
+// paintOnboardPresets 绘制接入方式 chips，返回下一个 y。
+func (a *App) paintOnboardPresets(c *ui.Canvas, x, iw, yy int32) int32 {
+	th := a.th
+	u := a.ui
 	// 预设 chips
 	chipH := int32(30)
 	cx := x
@@ -185,7 +196,13 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 		cx += w + 8
 	}
 	yy += chipH + 20
+	return yy
+}
 
+// paintOnboardFields 绘制 Base URL / API Key / 模型 ID，返回下一个 y。
+func (a *App) paintOnboardFields(c *ui.Canvas, x, iw, yy int32) int32 {
+	th := a.th
+	u := a.ui
 	// Base URL
 	c.TextFace(x, yy, "接口地址 Base URL", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	yy += 20
@@ -244,7 +261,13 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 		c.TextFace(x, yy, ellipsis(c, a.modelsMsg, ui.FsXs, 400, iw), ui.FsXs, 400, col, ui.FaceUI)
 		yy += 22
 	}
+	return yy
+}
 
+// paintOnboardWorkDir 绘制默认工作目录，返回下一个 y。
+func (a *App) paintOnboardWorkDir(c *ui.Canvas, x, iw, yy int32) int32 {
+	th := a.th
+	u := a.ui
 	// 工作目录
 	c.TextFace(x, yy, "默认工作目录", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	c.TextFace(x+c.MeasureFace("默认工作目录", ui.FsXs, 500, ui.FaceUI)+14, yy, "新会话默认目录，可在顶栏单独切换", ui.FsXs, 400, th.TextMute, ui.FaceUI)
@@ -275,7 +298,13 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 		})
 	}
 	yy += 52
+	return yy
+}
 
+// paintOnboardFooter 绘制测试结果与开始按钮。
+func (a *App) paintOnboardFooter(c *ui.Canvas, card ui.Rect, x, iw, yy int32) {
+	th := a.th
+	u := a.ui
 	// 测试结果
 	if a.testMsg != "" {
 		col := th.TextMute
