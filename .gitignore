@@ -41,3 +41,4 @@ temp/
 output/
 __pycache__/
 *.bak
+release/SHA256SUMS.txt

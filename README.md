@@ -109,7 +109,7 @@ flowchart LR
 
 ### 方式一：安装包（推荐）
 
-在 [Releases](https://github.com/MC5lan/WIN7Harness/releases/latest) 页面下载 `WIN7Harness-v*-win7.zip`（内含安装包、双架构 exe、使用说明和 LICENSE）：
+在 [Releases](https://github.com/MC5lan/WIN7Harness/releases/latest) 页面下载 `WIN7Harness-v*-win7.zip`（内含安装包、双架构 exe、使用说明、LICENSE 与 NOTICE）：
 
 <p align="center">
   <a href="https://github.com/MC5lan/WIN7Harness/releases/latest"><img src="https://img.shields.io/badge/下载-Win7%20整合包-E0663B?style=for-the-badge" alt="下载 Win7 整合包"></a>
@@ -254,6 +254,11 @@ scripts/              安装器回归、UI 回归、生命周期检查
 | [企业网络 / PAC / WPAD / CA](docs/win7-enterprise-network-v1.36.md) | 企业内网与证书配置 |
 | [Canvas 渲染与故障排查](docs/canvas-render.md) | 自绘渲染与常见问题 |
 | [Win32 API 注意事项](docs/win32-api-notes.md) | Win7 上的 API 使用边界 |
+| [更新日志](CHANGELOG.md) | v1.7.0 → v1.38.1 的版本演进 |
+| [贡献指南](CONTRIBUTING.md) | 红线、构建、验证与 PR 规范 |
+| [依赖审计](docs/deps-audit.md) | 直接/间接依赖、许可证与裁剪结论 |
+| [发布流程](docs/release-process.md) | 改版本、打 tag、签名与验证 `/update` |
+| [安全策略](SECURITY.md) | 漏洞报告渠道与数据处理说明 |
 
 ## 安全与隐私
 
