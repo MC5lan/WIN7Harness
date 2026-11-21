@@ -12,7 +12,7 @@ env:
 
 jobs:
   release:
-    runs-on: ubuntu-22.04
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -20,36 +20,50 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
       - name: 校验 tag 与源码版本号一致
+        shell: pwsh
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          SRC=$(sed -n 's/^const Version = "\(.*\)"/\1/p' internal/core/config.go)
-          echo "tag=$TAG source=$SRC"
-          test "$TAG" = "$SRC" || { echo "tag 与 internal/core/config.go 的 Version 不一致"; exit 1; }
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          $src = (Select-String -Path internal/core/config.go -Pattern '^const Version = "([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "tag=$tag source=$src"
+          if ($tag -ne $src) { throw "tag 与 internal/core/config.go 的 Version 不一致" }
       - name: 依赖准入
         run: go run ./cmd/depguard
       - name: 安装 rsrc（图标资源编译器）
-        # build.sh 的交叉编译段需要 rsrc 把 ico 嵌进 PE；runner 默认没有。
         run: |
           go install github.com/akavel/rsrc@v0.10.2
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-      - name: 构建（跳过图标生成）
+          "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: 安装 Inno Setup 6.7.x
+        run: choco install innosetup --version=6.7.1 -y --no-progress
+      - name: 构建完整 Windows 包（双架构 + 安装包）
         env:
-          SKIP_ICON: "1"
           UPDATE_PUBKEY: ${{ secrets.UPDATE_PUBKEY }}
           REQUIRE_SIGNED: "1"
-          OUT_DIR: dist
-        run: ./build.sh
+        run: powershell -ExecutionPolicy Bypass -File build\build-release.ps1 -Test
+      - name: 打包 ZIP
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path internal/core/config.go -Pattern '^const Version = "([^"]+)"').Matches[0].Groups[1].Value
+          $zip = "dist/WIN7Harness-v$version-win7.zip"
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          $files = Get-ChildItem dist -File | Where-Object {
+            $_.Name -ne (Split-Path $zip -Leaf) -and $_.Name -ne "SHA256SUMS.txt" -and $_.Name -ne "latest.json"
+          }
+          Compress-Archive -Path $files.FullName -DestinationPath $zip -CompressionLevel Optimal
       - name: 生成更新清单
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
         run: |
-          go run ./tools/make_manifest \
-            -version "${GITHUB_REF_NAME#v}" \
-            -out dist/latest.json \
-            -key-from-env UPDATE_PRIVATE_KEY \
-            -dist dist
+          $version = (Select-String -Path internal/core/config.go -Pattern '^const Version = "([^"]+)"').Matches[0].Groups[1].Value
+          go run ./tools/make_manifest -version $version -out dist/latest.json -key-from-env UPDATE_PRIVATE_KEY -dist dist
       - name: 生成校验和
-        run: cd dist && sha256sum *.exe *.zip latest.json > SHA256SUMS.txt && cat SHA256SUMS.txt
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | Sort-Object Name | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$h  $($_.Name)"
+          }
+          [IO.File]::WriteAllText((Join-Path (Get-Location) "dist\SHA256SUMS.txt"), ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding($false)))
+          Get-Content dist\SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: |

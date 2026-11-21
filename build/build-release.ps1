@@ -91,6 +91,14 @@ if ($Test) {
 Write-Host "[2/5] 编译 amd64 / 386" -ForegroundColor Yellow
 $buildTime = Get-Date -Format "yyyyMMdd-HHmm"
 $ldflags = "-s -w -H=windowsgui -X main.buildTime=$buildTime"
+if ($env:UPDATE_PUBKEY) {
+    $ldflags += " -X win7harness/internal/core.UpdatePublicKey=$($env:UPDATE_PUBKEY)"
+    Write-Host "      更新清单验签：已注入公钥"
+} elseif ($env:REQUIRE_SIGNED -eq "1") {
+    throw "REQUIRE_SIGNED=1 但未设置 UPDATE_PUBKEY：拒绝构建未验签版本"
+} else {
+    Write-Host "      !! 未设置 UPDATE_PUBKEY：本次构建跳过更新清单验签（仅开发）"
+}
 
 Push-Location $root
 try {

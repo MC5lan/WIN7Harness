@@ -48,9 +48,11 @@ tag 必须与 `const Version` 完全一致，否则 workflow 第一步就会失�
 
 1. 校验 tag 与源码版本
 2. 跑 `cmd/depguard`
-3. 安装 `rsrc`，用 `build.sh` 编译双架构
-4. 用 `UPDATE_PRIVATE_KEY` 生成并签名 `latest.json`
-5. 上传 zip / `latest.json` / `SHA256SUMS.txt` 到 Release
+3. 在 Windows runner 上安装 `rsrc` 与 Inno Setup 6.7.x
+4. 用 `build-release.ps1` 编译双架构 exe + 安装包，并通过 `UPDATE_PUBKEY` 注入验签公钥
+5. 用 `UPDATE_PRIVATE_KEY` 生成并签名 `latest.json`
+6. 打包完整 zip，生成 `SHA256SUMS.txt`
+7. 上传 zip / `latest.json` / `SHA256SUMS.txt` 到 Release
 
 缺少 `UPDATE_PUBKEY` 或 `UPDATE_PRIVATE_KEY` 时构建会**故意失败**，
 不要通过删除 `REQUIRE_SIGNED` 或跳过签名来绕过。
