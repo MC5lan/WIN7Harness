@@ -206,6 +206,12 @@ func CommandRisk(cmd string) RiskLevel {
 			return RiskDanger
 		}
 	}
+	if destructiveBySwitches(low) {
+		return RiskDanger
+	}
+	if cautionByCommand(low) {
+		return RiskCaution
+	}
 	// 解释器直执行：至少 caution，提醒用户确认。
 	for _, p := range interpreterPatterns {
 		if strings.Contains(low, p) {
@@ -276,4 +282,187 @@ func trimFloat(v float64) string {
 		s = itoa(whole) + "." + itoa(frac)
 	}
 	return s
+}
+
+// destructiveBySwitches 按“命令 + 开关集合”识别删除类命令。
+//
+// 为什么需要：dangerPatterns 是定序子串，cmd/rm 的开关却与顺序无关，
+// "rd /q /s"、"rmdir /q /s"、"rm -r -f"、"erase /s /q" 都能绕过 "rd /s"、"rm -rf"
+// 这类条目被判为 safe，auto 模式下会静默执行。这里把命令切段、取命令名，
+// 再看开关里有没有对应的破坏性标志，与书写顺序无关。
+// 入参 low 已经过 normalizeCmd（小写、去引号、空白归一）。
+func destructiveBySwitches(low string) bool {
+	for _, f := range cmdSegments(low) {
+		args := f[1:]
+		switch cmdBase(f[0]) {
+		case "rd", "rmdir":
+			if hasCmdSwitch(args, 's') {
+				return true
+			}
+		case "del", "erase":
+			// 与 dangerPatterns 中 del /f、del /q、del /s 保持一致；erase 是 del 的别名。
+			if hasCmdSwitch(args, 'f') || hasCmdSwitch(args, 'q') || hasCmdSwitch(args, 's') {
+				return true
+			}
+		case "rm":
+			// 与 rm -rf / rm -fr 保持一致：递归 + 强制同时出现才算高危。
+			if hasDashFlag(args, 'r', "--recursive") && hasDashFlag(args, 'f', "--force") {
+				return true
+			}
+		case "git":
+			if gitDiscardsWork(args) {
+				return true
+			}
+		case "wevtutil":
+			// wevtutil cl System：清空事件日志，事后无法追查。
+			if len(args) > 0 && (args[0] == "cl" || args[0] == "clear-log") {
+				return true
+			}
+		case "sc":
+			// sc [\\server] delete <服务>：删除系统服务。
+			if hasArg(args, "delete") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// cautionByCommand 识别本身不删数据、但会下载执行或留下持久化的系统命令，
+// 抬到 caution 让用户确认。这些命令不在 interpreterPatterns 里，此前判为 safe。
+func cautionByCommand(low string) bool {
+	for _, f := range cmdSegments(low) {
+		args := f[1:]
+		switch cmdBase(f[0]) {
+		case "bitsadmin":
+			// Win7 自带的下载器：bitsadmin /transfer 下载后常紧跟着运行。
+			if hasArg(args, "/transfer") || hasArg(args, "/addfile") || hasArg(args, "/create") {
+				return true
+			}
+		case "schtasks":
+			// 计划任务：普通用户即可创建开机/登录自启。
+			if hasArg(args, "/create") || hasArg(args, "/change") || hasArg(args, "/delete") {
+				return true
+			}
+		case "sc":
+			if hasArg(args, "config") || hasArg(args, "create") || hasArg(args, "stop") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// gitDiscardsWork 判断 git 子命令是否会丢弃未提交的改动或删除未跟踪文件，
+// 这类操作没有 git 层面的撤销手段。args 是 git 之后的参数（已小写）。
+func gitDiscardsWork(args []string) bool {
+	// 跳过全局选项：-c k=v、-C <dir>（normalizeCmd 已统一小写，二者都带一个值）、--no-pager 等。
+	i := 0
+	for i < len(args) && strings.HasPrefix(args[i], "-") {
+		if args[i] == "-c" {
+			i++
+		}
+		i++
+	}
+	if i >= len(args) {
+		return false
+	}
+	sub, rest := args[i], args[i+1:]
+	switch sub {
+	case "clean":
+		// git clean 默认要求 -f；-n / --dry-run 只是预览。
+		return hasDashFlag(rest, 'f', "--force") && !hasDashFlag(rest, 'n', "--dry-run")
+	case "reset":
+		return hasArg(rest, "--hard")
+	case "checkout":
+		// git checkout -- <路径> / git checkout . / -f：用索引覆盖工作区改动。
+		return hasArg(rest, "--") || hasArg(rest, ".") || hasArg(rest, "-f") || hasArg(rest, "--force")
+	case "restore":
+		// 只有 --staged 而没有 --worktree 时只动暂存区，不丢改动。
+		return len(rest) > 0 && !(hasArg(rest, "--staged") && !hasArg(rest, "--worktree"))
+	case "stash":
+		return len(rest) > 0 && (rest[0] == "clear" || rest[0] == "drop")
+	}
+	return false
+}
+
+// cmdSegments 按 && || & | ; 切段，剥掉外层 cmd /c，返回每段的字段（至少一个）。
+func cmdSegments(low string) [][]string {
+	var out [][]string
+	for _, seg := range splitCmdSegments(low) {
+		f := strings.Fields(seg)
+		// cmd /c rd /q /s x：剥掉外层 cmd 再看真正的命令。
+		for len(f) >= 2 && cmdBase(f[0]) == "cmd" {
+			i := 1
+			for i < len(f) && strings.HasPrefix(f[i], "/") && f[i] != "/c" && f[i] != "/k" {
+				i++
+			}
+			if i >= len(f) {
+				break
+			}
+			f = f[i+1:]
+		}
+		if len(f) > 0 {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func hasArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// splitCmdSegments 按 && || & | ; 把命令行切成独立命令。
+func splitCmdSegments(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool {
+		return r == '&' || r == '|' || r == ';'
+	})
+}
+
+// cmdBase 取命令名：去掉路径与 .exe/.com 后缀（c:\windows\system32\cmd.exe -> cmd）。
+func cmdBase(tok string) string {
+	if i := strings.LastIndexAny(tok, `\/`); i >= 0 && i < len(tok)-1 {
+		tok = tok[i+1:]
+	}
+	tok = strings.TrimSuffix(tok, ".exe")
+	tok = strings.TrimSuffix(tok, ".com")
+	return tok
+}
+
+// hasCmdSwitch 判断 cmd 风格开关里是否含 /<c>，兼容 "/s /q" 与连写的 "/s/q"。
+func hasCmdSwitch(args []string, c byte) bool {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "/") {
+			continue
+		}
+		for _, part := range strings.Split(a[1:], "/") {
+			if len(part) > 0 && part[0] == c {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasDashFlag 判断 POSIX 风格参数里是否有短标志 -<c>（可与其它短标志合写，如 -rf）或长标志 long。
+// rm 的 -r 与 -R 等价，normalizeCmd 已统一小写。
+func hasDashFlag(args []string, c byte, long string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == long {
+			return true
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.IndexByte(a[1:], c) >= 0 {
+			return true
+		}
+	}
+	return false
 }
