@@ -32,7 +32,8 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/win7-onboarding.png" alt="First run on Windows 7 SP1" width="72%">
+  <img src="assets/screenshots/win7-onboarding.png" alt="Welcome on Windows 7 SP1" width="49%">
+  <img src="assets/screenshots/onboarding-connect.png" alt="Connect model wizard" width="49%">
 </p>
 
 ## Why Windows 7

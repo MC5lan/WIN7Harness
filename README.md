@@ -47,9 +47,10 @@
 <p align="center"><sub>会话中心 · 设置与工具 · 深色主题设置</sub></p>
 
 <p align="center">
-  <img src="assets/screenshots/win7-onboarding.png" alt="Windows 7 SP1 上的首次启动界面" width="72%">
+  <img src="assets/screenshots/win7-onboarding.png" alt="Windows 7 SP1 上的欢迎页" width="49%">
+  <img src="assets/screenshots/onboarding-connect.png" alt="连接模型引导页" width="49%">
 </p>
-<p align="center"><sub>真实的 Windows 7 SP1 桌面环境</sub></p>
+<p align="center"><sub>重新设计的两步引导：品牌欢迎页 → 连接模型；左图为真实 Windows 7 SP1 桌面</sub></p>
 
 ---
 
