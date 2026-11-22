@@ -4,8 +4,10 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
+	"win7harness/internal/core"
 	"win7harness/internal/ui/kit"
 	"win7harness/internal/win32"
 )
@@ -167,6 +169,9 @@ func (a *App) MouseUp(x, y int32, button int) {
 }
 
 func (a *App) dispatchClick(id string) {
+	if os.Getenv("WIN7H_TRACE_CLICK") != "" {
+		core.Logf("[click] %s page=%d", id, a.page)
+	}
 	switch {
 	case strings.HasPrefix(id, "chip:"):
 		idx := 0
@@ -193,6 +198,8 @@ func (a *App) dispatchClick(id string) {
 			a.active = idx
 			a.hlMsg = -1
 			a.loadConv()
+			// 侧栏现在在所有页面都可见：从设置里点会话应回到对话页。
+			a.page = PageChat
 		}
 	case strings.HasPrefix(id, "hit:"):
 		var mi, hi int

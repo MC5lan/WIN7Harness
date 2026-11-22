@@ -82,11 +82,8 @@ func (a *App) Paint(c *ui.Canvas) {
 	if a.ui == nil {
 		a.ui = NewUI(c, a.th)
 		// 表单初值只在 UI 建立时填一次：过去 initForms 从未被调用，
-		// 引导页四个框全是空的；顺便给引导页一个初始焦点，打开即可打字。
+		// 引导页四个框全是空的。
 		a.initForms()
-		if a.page == PageOnboard {
-			a.ui.SetFocus("ob.base")
-		}
 	}
 	a.maybePromptPortableUnlock()
 	a.ui.c = c
@@ -99,7 +96,7 @@ func (a *App) Paint(c *ui.Canvas) {
 	a.ui.Begin(a.mx, a.my, a.phase)
 	// 页面/页签切换：命令流会整块换掉，但背景 Clear 命令完全相同，
 	// 脏区算法不会重绘"新页面没有画到的旧像素"。这里强制一次全帧。
-	key := fmt.Sprintf("%d/%d/%d/%d/%d", a.page, a.autoTab, a.extTab, a.useTab, a.diag.tab)
+	key := fmt.Sprintf("%d/%d/%d/%d/%d/%d", a.page, a.autoTab, a.extTab, a.useTab, a.diag.tab, a.onbStep)
 	if key != a.uiKey {
 		a.uiKey = key
 		a.forceFull = true
@@ -197,8 +194,8 @@ func (a *App) paintChat(c *ui.Canvas) {
 	// 背景分区
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 
-	// 侧栏背景（用实际宽度判定，折叠动画期间仍绘制）
-	if a.sideW > 0 {
+	// 单侧栏背景（railW 就是侧栏宽度）
+	if a.railW > 0 {
 		a.paintSideBG(c, H)
 	}
 	// 主区：抽屉模式下不占位，起点不含抽屉宽度
@@ -321,9 +318,8 @@ func (a *App) paintChatBody(c *ui.Canvas, u *UI, mx, cw, topH, H int32) {
 	th := a.th
 	// Rail 挪到最后一层画（见下方调用处）。
 
-	// 会话列表：内嵌态现在画（占位、和主区并排）；
-	// 抽屉态挪到最后一层画——浮层必须压在会话正文之上，否则正文会穿透到抽屉里。
-	if a.sideW > 0 && !a.sideDrawer {
+	// 会话列表就是唯一的左栏，始终与正文并排绘制。
+	if a.railW > 0 {
 		a.paintConvList(u, H, topH)
 	}
 
@@ -413,143 +409,115 @@ func (a *App) paintChatBody(c *ui.Canvas, u *UI, mx, cw, topH, H int32) {
 // paintSideBG 铺侧栏底色与右缘分隔线。
 // 内嵌态在画正文之前铺一次；抽屉态要在浮层层再铺一次（正文会盖掉前面那层）。
 func (a *App) paintSideBG(c *ui.Canvas, H int32) {
-	if a.sideW <= 0 {
+	if a.railW <= 0 {
 		return
 	}
-	c.FillRect(ui.R(a.railW, 0, a.sideW, H), a.th.Surface2)
-	c.VLine(a.railW+a.sideW-1, 0, H, a.th.Border)
+	// 单侧栏：整块 [0, railW) 都是会话/导航区。
+	c.FillRect(ui.R(0, 0, a.railW, H), a.th.Surface2)
+	c.VLine(a.railW-1, 0, H, a.th.Border)
 }
 
-// railItem 画一个暖色胶囊 rail 按钮：图标悬停带暖色底，选中态最暖，
-// 和 Claude/Raycast 的 rail 一致——外层一颗小圆角方块，而不是裸图标。
-func railItem(c *ui.Canvas, u *UI, id, glyph string, x, y int32, active bool) bool {
+// railNavItem 画一条「图标 + 文字」的导航项。
+// v1.39 之前左侧是 9 个 32px 的裸图标，用户只能靠猜；现在所有入口都有文字，
+// 并把整行（而不是小图标）做成命中区，Win7 触摸屏/高 DPI 也点得准。
+func railNavItem(c *ui.Canvas, u *UI, id, glyph, label string, r ui.Rect, active bool) bool {
 	th := u.th
-	r := ui.R(x, y, 32, 32)
-	hover := u.Hit(id, r)
-	_ = hover
+	u.Hit(id, r)
 	hvt := u.hoverT(id)
-	bg := uint32(0)
 	if active {
-		bg = ui.Blend(th.Card, th.AccentSoft, 0.85)
+		c.Round(r, 9, ui.Blend(th.Card, th.AccentSoft, 0.9))
+		c.RoundStroke(r, 9, ui.Blend(th.BorderSoft, th.Accent, 0.38))
+		c.FillRect(ui.R(r.X+1, r.Y+9, 3, r.H-18), th.Accent)
 	} else if hvt > 0 {
-		bg = ui.Blend(th.Card, th.CardHover, hvt*0.9)
+		c.Round(r, 9, ui.Blend(th.Card, th.CardHover, hvt*0.9))
 	}
-	if bg != 0 {
-		c.Round(r, 8, bg)
-	}
-	if active {
-		c.RoundStroke(r, 8, ui.Blend(th.BorderSoft, th.Accent, 0.35))
-	}
-	kind := glyph
 	fg := th.TextDim
+	var weight int32 = 500
 	if active {
-		fg = th.Accent
+		fg, weight = th.AccentText, 700
 	} else if hvt > 0 {
 		fg = th.Text
 	}
-	if ik, ok := iconKind(kind); ok {
-		drawIcon(c, ik, ui.R(r.CX()-8, r.CY()-8, 16, 16), fg)
+	if ik, ok := iconKind(glyph); ok {
+		drawIcon(c, ik, ui.R(r.X+12, r.CY()-8, 16, 16), fg)
 	}
+	c.TextFace(r.X+40, ui.TextTop(c, r, ui.FsSm), label, ui.FsSm, weight, fg, ui.FaceUI)
 	if u.focus == id {
-		c.RoundStroke(r.Inset(-2), 10, th.InputFocus)
+		c.RoundStroke(r.Inset(-2), 11, th.InputFocus)
 	}
-	return u.Clicked(id)
+	return !active && u.Clicked(id)
 }
 
+// paintRail 现在只负责单侧栏的「底部导航」：全部会话 / 工作区 / 设置与工具，
+// 顺序固定、全部带文字，且都位于侧栏底部（设置与工具在最后一项）。
+// 聊天页的顶部（品牌 + 新建会话 + 搜索 + 最近）由 paintConvList 画，
+// 其它页面顶部由各页自己画；这样任何页面都能从底部回到设置或会话。
 func (a *App) paintRail(u *UI, H int32) {
+	if a.railW <= 0 {
+		return
+	}
 	c := u.c
 	th := a.th
-	c.FillRect(ui.R(0, 0, a.railW, H), th.Surface2)
-	c.VLine(a.railW-1, 0, H, th.BorderSoft)
-
-	// Logo（warm 珊瑚）
-	DrawLogo(c, 15, 12, 26, th.Accent, th.Surface2)
-
-	// 用暖色胶囊 rail 按钮替代裸图标
-	y := int32(58)
-	step := int32(40)
-	if railItem(c, u, "rail.new", "ico:plus", 12, y, false) {
-		a.page = PageChat
-		a.newConv()
+	// 侧栏在所有页面都保持完整：会话列表不能因为点了「设置与工具」就消失。
+	// 聊天页由 paintChatBody 画列表；其它页面统一在这里补画同一份列表。
+	if a.page != PageChat {
+		c.FillRect(ui.R(0, 0, a.railW, H), th.Surface2)
+		c.VLine(a.railW-1, 0, H, th.Border)
+		a.paintConvList(u, H, a.topH())
 	}
-	y += step
-	if railItem(c, u, "rail.side", "ico:menu", 12, y, a.showSide) {
-		a.page = PageChat
-		a.toggleDrawer()
+
+	sep := H - 166
+	if sep > 120 {
+		c.HLine(16, sep, a.railW-32, th.BorderSoft)
 	}
-	y += step
-	if railItem(c, u, "rail.diag", "ico:check", 12, y, a.page == PageDiag) {
-		a.page = PageDiag
-		if len(a.diag.results) == 0 {
-			a.runChecksAsync()
+	// 顺序：全部会话 → 工作区 → 设置与工具（设置永远在最后一项）。
+	items := []struct {
+		id, glyph, label string
+		page             Page
+	}{
+		{"rail.sessions", "ico:star", "全部会话", PageSessions},
+		{"rail.workspace", "ico:panel", "工作区", PageWorkspace},
+		{"rail.settings", "ico:gear", "设置与工具", PageSettings},
+	}
+	for i, it := range items {
+		y := H - 154 + int32(i)*44
+		if y+40 > H-20 {
+			y = H - 60 - int32(len(items)-i)*44
+		}
+		r := ui.R(8, y, a.railW-16, 40)
+		if railNavItem(c, u, it.id, it.glyph, it.label, r, a.page == it.page) {
+			switch it.page {
+			case PageSessions:
+				a.sessDirty = true
+			case PageWorkspace:
+				a.invalidateWorkspace()
+			case PageSettings:
+				a.settingsScrl = 0
+			}
+			a.page = it.page
+			a.forceFull = true
 		}
 	}
-	y += step
-	if railItem(c, u, "rail.auto", "ico:clock", 12, y, a.page == PageAuto) {
-		a.page = PageAuto
-	}
-	y += step
-	if railItem(c, u, "rail.ext", "ico:grid", 12, y, a.page == PageExt) {
-		a.page = PageExt
-	}
-	y += step
-	if railItem(c, u, "rail.use", "ico:chart", 12, y, a.page == PageUsage) {
-		a.page = PageUsage
-	}
-	y += step
-	if railItem(c, u, "rail.sessions", "ico:star", 12, y, a.page == PageSessions) {
-		a.page = PageSessions
-		a.sessDirty = true
-	}
-	y += step
-	if railItem(c, u, "rail.workspace", "ico:panel", 12, y, a.page == PageWorkspace) {
-		a.page = PageWorkspace
-		a.invalidateWorkspace()
-	}
-	y += step
-	if railItem(c, u, "rail.costs", "ico:coin", 12, y, a.page == PageCosts) {
-		a.page = PageCosts
-	}
-	y += step
-	if railItem(c, u, "rail.notices", "ico:bell", 12, y, a.page == PageNotices) {
-		a.page = PageNotices
-	}
-
-	// 左下角：设置入口固定在 rail 底部，和常见桌面应用一致；
-	// 上面的业务页再多，设置的位置也不会随列表长度漂移。
-	gearY := H - 92
-	if gearY < y+8 {
-		gearY = y + 8
-	}
-	if gearY > 64 {
-		c.HLine(12, gearY-12, a.railW-24, th.BorderSoft)
-	}
-	if railItem(c, u, "rail.settings", "ico:gear", 12, gearY, a.page == PageSettings) {
-		a.page = PageSettings
-		a.settingsScrl = 0
-	}
-	// 左下角整块都是设置热区：齿轮只有 32px，老人机/触摸屏/高 DPI 下
-	// 精确点中小图标并不容易；版本号本身不承载其他动作，可以一起让给设置。
-	u.Hit("rail.settings", ui.R(8, H-170, 40, H-30-(H-170)))
-
-	// 底部版本号
-	c.TextFace(16, H-30, "v"+core.Version, ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(16, H-18, "v"+core.Version+" · 本地运行", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 }
 
 func (a *App) paintConvList(u *UI, H, topH int32) {
 	c := u.c
 	th := a.th
-	x := a.railW
-	// 头部
-	c.TextFace(x+16, 14, "会话", ui.FsSm, 700, th.TextDim, ui.FaceUI)
-	btn := ui.R(x+a.sideW-82, 8, 70, 24)
-	if u.Button("conv.new", "+ 新建", btn, BtnGhost) {
+	// 单侧栏：品牌区 → 新建会话主按钮 → 搜索 → 最近会话 → 底部导航。
+	// 所有控件都在 [0, railW) 内，聊天区从 railW 开始，左侧不再有第二层栏。
+	DrawLogo(c, 16, 14, 24, th.Accent, th.Surface2)
+	c.TextFace(48, 15, "WIN7 Harness", ui.FsSm, 700, th.Text, ui.FaceUI)
+	c.TextFace(48, 32, "本地工作区", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+
+	newR := ui.R(12, 66, a.railW-24, 34)
+	if u.Button("conv.new", "+ 新建会话", newR, BtnPrimary) {
 		a.editReset()
 		a.newConv()
 	}
 
 	// 搜索框：标题与正文都能搜，输入即过滤
-	q := u.TextField("conv.q", ui.R(x+8, topH, a.sideW-16, 30), "", "搜索标题或内容…")
+	q := u.TextField("conv.q", ui.R(12, 110, a.railW-24, 30), "", "搜索标题或内容…")
 	if u.Clicked("conv.q") {
 		a.editReset()
 		u.SetFocus("conv.q")
@@ -559,19 +527,20 @@ func (a *App) paintConvList(u *UI, H, topH int32) {
 	if a.dense() {
 		rowH, rowGap = 46, 50
 	}
-	// 折叠动画收尾段宽度过窄时只留底色，避免文字被挤压变形
-	if a.sideW < 64 {
+	if a.railW < 180 {
 		a.convListH = 0
 		return
 	}
-	y := topH + 34
+	y := int32(164)
+	c.TextFace(16, 150, "最近", ui.FsXs, 700, th.TextMute, ui.FaceUI)
 
-	listClip := ui.R(x, topH+30, a.sideW, H-topH-70)
+	// 底部「全部会话 / 工作区 / 设置与工具」各占 40px，列表不能压到它们上面。
+	listClip := ui.R(0, 164, a.railW, H-164-166)
 	c.Clip(listClip)
 	defer c.PopClip()
 
 	if len(matches) == 0 {
-		c.TextFace(x+16, topH+52, "没有匹配的会话", ui.FsSm, 400, th.TextMute, ui.FaceUI)
+		c.TextFace(16, 182, "没有匹配的会话", ui.FsSm, 400, th.TextMute, ui.FaceUI)
 		a.convListH = 0
 		return
 	}
@@ -579,7 +548,7 @@ func (a *App) paintConvList(u *UI, H, topH int32) {
 	for _, m := range matches {
 		i := m.idx
 		cv := a.convs[i]
-		r := ui.R(x+8, y-int32(a.convScrl), a.sideW-16, rowH)
+		r := ui.R(8, y-int32(a.convScrl), a.railW-16, rowH)
 		if r.Y > listClip.Bottom() || r.Bottom() < listClip.Y {
 			y += rowGap
 			continue
@@ -639,7 +608,7 @@ func (a *App) paintConvList(u *UI, H, topH int32) {
 		c.TextFace(r.X+12, r.Y+30, sub, ui.FsXs, 400, th.TextMute, ui.FaceUI)
 		y += 56
 	}
-	a.convListH = y - (topH + 38)
+	a.convListH = y - 166
 }
 
 func ellipsis(c *ui.Canvas, s string, size, weight, maxW int32) string {

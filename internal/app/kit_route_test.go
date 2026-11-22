@@ -45,7 +45,8 @@ func TestKitPageBodyClicksStayInKit(t *testing.T) {
 		page:  PageDiag,
 		railW: railPanelW,
 	}
-	btn := ui.R(100, 100, 120, 30)
+	// 正文控件必须落在 rail 右侧；rail 变宽后不能再用固定 x=100。
+	btn := ui.R(railPanelW+40, 100, 120, 30)
 	clicked := false
 	k.RegisterHit("diag.tab.checks", btn, func() { clicked = true })
 

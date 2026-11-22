@@ -41,18 +41,24 @@ func (a *App) layout() {
 		SideUser: a.sideWUser, InspUser: a.inspWUser,
 		SideA: a.sideA, InspA: a.inspA,
 	})
+	// v1.40.1：左侧只剩一块栏。railPanelW 就是这块栏的宽度，
+	// 原来的 side 分栏并入 rail，因此 sideW / sideOcc 恒为 0；
+	// 会话列表直接画在 [0, railW) 里，聊天区从 railW 开始。
 	a.railW = g.RailW
-	a.sideW = g.SideW
+	a.sideW = 0
 	a.inspW = g.InspW
-	a.sideOcc = g.SideOcc
+	a.sideOcc = 0
 	a.inspOcc = g.InspOcc
-	a.chatW = g.ChatW
-	a.layW = g.LayW
-	// 抽屉开合会整块挪动面板：拓扑变了就下一帧整屏重绘，别指望局部脏区能擦干净。
-	if a.sideDrawer != g.SideDrawer || a.inspDrawer != g.InspDrawer {
+	a.chatW = a.winW - a.railW - a.inspOcc
+	if a.chatW < minChatW {
+		a.chatW = minChatW
+	}
+	a.layW = a.winW - a.railW - a.inspOcc
+	// 抽屉拓扑只剩检查器：栏宽变化同样需要整帧重绘。
+	if a.inspDrawer != g.InspDrawer || a.sideDrawer {
 		a.forceFull = true
 	}
-	a.sideDrawer = g.SideDrawer
+	a.sideDrawer = false
 	a.inspDrawer = g.InspDrawer
 	a.chatH = a.winH
 	a.logLayout(g)

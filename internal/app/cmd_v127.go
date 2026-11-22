@@ -662,6 +662,7 @@ func (a *App) cmdTheme(rest string) {
 		a.th = ui.ResolveTheme(a.cfg.Theme)
 		a.cfg.Save()
 		a.ver++
+		a.forceFull = true
 		a.sysNote("主题已切换：" + a.cfg.Theme)
 	default:
 		a.toast("可用主题：dark / light / hc", true)

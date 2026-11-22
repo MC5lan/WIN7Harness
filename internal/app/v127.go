@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -74,7 +75,10 @@ func (a *App) initV127() {
 		}
 	}
 	go a.watchLoop()
-	if a.cfg.CheckUpdateOnStart && strings.TrimSpace(a.cfg.UpdateURL) != "" {
+	manifestMode := strings.EqualFold(strings.TrimSpace(a.cfg.UpdateSource), core.UpdateSourceManifest)
+	updateConfigured := (manifestMode && strings.TrimSpace(a.cfg.UpdateURL) != "") ||
+		(!manifestMode && strings.TrimSpace(a.cfg.UpdateRepo) != "")
+	if a.cfg.CheckUpdateOnStart && updateConfigured {
 		go a.checkUpdateQuiet()
 	}
 }
@@ -252,18 +256,43 @@ func (a *App) checkUpdateQuiet() {
 	if st == nil {
 		return
 	}
-	url := strings.TrimSpace(a.cfg.UpdateURL)
-	if url == "" {
-		url = core.DefaultManifestURL
-	}
-	m, newer, err := core.CheckUpdate(core.Version, url, core.HTTPFetcher)
+	uc, newer, err := core.CheckUpdateAny(core.Version, a.cfg.UpdateSource, a.cfg.UpdateRepo,
+		strings.TrimSpace(a.cfg.UpdateURL), core.HTTPFetcher)
 	if err != nil || !newer {
 		return
 	}
 	select {
-	case st.updCh <- fmt.Sprintf("发现新版本 %s（当前 %s）。\n%s\n更新：/update 查看详情", m.Version, core.Version, m.ShortNotes()):
+	case st.updCh <- fmt.Sprintf("发现新版本 %s（当前 %s）。\n%s\n更新：/update 查看详情", uc.Version, core.Version, uc.Notes):
 	default:
 	}
+	if a.cfg.AutoDownloadUpdate {
+		go a.autoDownloadUpdate(uc)
+	}
+}
+
+// autoDownloadUpdate 后台下载已校验的更新包并暂存，不替换正在运行的 exe。
+func (a *App) autoDownloadUpdate(uc *core.UpdateCheck) {
+	if uc == nil || uc.File.URL == "" {
+		return
+	}
+	if err := core.PrepareUpdate(core.UpdatesDir()); err != nil {
+		a.notify("更新包下载失败", err.Error(), true)
+		return
+	}
+	newExe, err := core.DownloadUpdate(uc.File, runtime.GOARCH, core.HTTPFetcher)
+	if err != nil {
+		a.notify("更新包下载失败", err.Error(), true)
+		return
+	}
+	if want := core.ExeArchOfSelf(); want != "" {
+		if err := core.CheckUpdateArch(newExe, want); err != nil {
+			a.notify("更新包架构不匹配", err.Error(), true)
+			return
+		}
+	}
+	_ = core.StageUpdate(core.UpdatesDir(), newExe)
+	a.notify("更新包已就绪", "版本 "+uc.Version+" 已通过 SHA256 与架构校验；重启后运行 /update apply 安装。", false)
+	core.Logf("auto-update: 已暂存 %s (%s)", newExe, uc.Version)
 }
 
 // drainUpdate 把更新提示转成界面上的系统消息。

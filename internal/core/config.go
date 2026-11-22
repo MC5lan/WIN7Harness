@@ -15,7 +15,7 @@ import (
 var errEmptyDir = errors.New("目录路径为空")
 
 // Version 是应用版本号，同时用于配置迁移判断。
-const Version = "1.40.0"
+const Version = "2.0.0"
 
 // PresetVersion 是接入预设的版本号。v3 起不再内置任何模型名：
 // 应用只认识 OpenAI 兼容协议，模型 ID 由用户填写或从端点 /models 动态拉取。
@@ -194,6 +194,13 @@ type Config struct {
 	UpdateURL string `json:"update_url,omitempty"`
 	// CheckUpdateOnStart 启动时静默查一次；只提示，不自动下载替换。
 	CheckUpdateOnStart bool `json:"check_update_on_start,omitempty"`
+	// UpdateSource 更新源：github（Releases API + SHA256SUMS）| manifest（签名清单）。
+	UpdateSource string `json:"update_source,omitempty"`
+	// UpdateRepo 是 GitHub 仓库 owner/repo，只接受字母数字下划线点划线，防止 URL 注入。
+	UpdateRepo string `json:"update_repo,omitempty"`
+	// AutoDownloadUpdate 在发现新版本时后台下载并校验，暂存到 updates 目录；
+	// 不自动替换正在运行的 exe，重启后由用户确认安装。
+	AutoDownloadUpdate bool `json:"auto_download_update,omitempty"`
 
 	// NoFoldTools 关闭"工具卡按组合并"。默认零值即开启，故用反向字段存盘：
 	// 老配置里没有这个键，反序列化后仍是 false，正好保持默认开启，
@@ -369,6 +376,8 @@ func DefaultConfig() *Config {
 		VerifyMode:   "auto",
 		ToolProfile:  "auto",
 		PromptCache:  "auto",
+		UpdateSource: UpdateSourceGitHub,
+		UpdateRepo:   DefaultUpdateRepo,
 		KeyBindings:  DefaultKeyBindings(),
 		ShowThinking: true,
 		// 8 千字符约等于 2 千 token，够放结论与关键证据，又不至于挤掉主对话的上下文

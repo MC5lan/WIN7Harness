@@ -103,7 +103,9 @@ func (e *sessRow) Paint(c *kit.Ctx, g kit.Painter) {
 		count = 0
 		label = "0"
 	}
-	g.TextRectFace(badge, label, ui.FsSm, 700, tk.AccentBase, 0x0021, ui.FaceUI)
+	// 0x25 = DT_CENTER | DT_VCENTER | DT_SINGLELINE。
+	// 旧值 0x21 少了 DT_VCENTER，数字会贴在标记块顶边而不是垂直居中。
+	g.TextRectFace(badge, label, ui.FsSm, 700, tk.AccentBase, 0x0025, ui.FaceUI)
 	tx := r.X + 54
 
 	// 标题与预览各自截断
@@ -123,7 +125,7 @@ func (e *sessRow) Paint(c *kit.Ctx, g kit.Painter) {
 			pr := ui.R(r.Right()-144, r.Y+18, 52, 24)
 			g.Round(pr, 6, tk.BGSurface)
 			g.RoundStroke(pr, 6, tk.BorderHairline)
-			g.TextRectFace(pr, "置顶", ui.FsXs, 400, tk.TextSecondary, 0x0021, ui.FaceUI)
+			g.TextRectFace(pr, "置顶", ui.FsXs, 400, tk.TextSecondary, 0x0025, ui.FaceUI)
 			c.RegisterHit(pinID, pr, e.OnPin)
 		}
 		if e.OnDelete != nil {
@@ -131,7 +133,7 @@ func (e *sessRow) Paint(c *kit.Ctx, g kit.Painter) {
 			dr := ui.R(r.Right()-88, r.Y+18, 52, 24)
 			g.Round(dr, 6, tk.BGSurface)
 			g.RoundStroke(dr, 6, tk.BorderHairline)
-			g.TextRectFace(dr, "删除", ui.FsXs, 400, tk.StateDanger, 0x0021, ui.FaceUI)
+			g.TextRectFace(dr, "删除", ui.FsXs, 400, tk.StateDanger, 0x0025, ui.FaceUI)
 			c.RegisterHit(delID, dr, e.OnDelete)
 		}
 	} else {
@@ -148,13 +150,8 @@ func (a *App) paintSessionsPage(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
 
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "会话中心", ui.FsLg, 700, th.Text, ui.FaceUI)
-	// 快捷回车：esc 或返回按钮回到对话
-	if u.Button("sessions.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	// 顶栏：与其它二级页统一
+	if a.paintPageHeader(u, "sessions.back", "全部会话", "所有已保存的会话") {
 		a.page = PageChat
 	}
 
@@ -430,13 +427,37 @@ func (a *App) drainHydration() {
 
 func convLastPreview(cv *Conv) string {
 	for i := len(cv.Msgs) - 1; i >= 0; i-- {
-		t := strings.TrimSpace(cv.Msgs[i].Text)
+		t := strings.Join(markdownLines(cv.Msgs[i].Text), " ")
 		if t == "" {
 			continue
 		}
 		return clipSnippet(t, 0, 24)
 	}
 	return ""
+}
+
+// markdownLines 去掉 Markdown 标记（代码围栏、行内代码、加粗、标题与列表符号），
+// 按行返回纯文本。预览和对照页要读成正文，不能把源码符号原样露出来。
+func markdownLines(s string) []string {
+	var out []string
+	fence := false
+	for _, ln := range strings.Split(s, "\n") {
+		ln = strings.TrimSpace(ln)
+		if strings.HasPrefix(ln, "```") {
+			fence = !fence
+			continue // 开/闭围栏本身不输出
+		}
+		if fence && len(out) > 0 && strings.Trim(ln, "go0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+#-") == "" {
+			continue // 围栏后的语言标签（go / python 等）
+		}
+		ln = strings.NewReplacer("`", "", "**", "", "__", "").Replace(ln)
+		ln = strings.TrimSpace(strings.TrimLeft(ln, "#"))
+		ln = strings.TrimPrefix(strings.TrimPrefix(ln, "- "), "* ")
+		if ln != "" {
+			out = append(out, ln)
+		}
+	}
+	return out
 }
 
 // ---------- 工作区总览 ----------
@@ -691,12 +712,7 @@ func (a *App) paintWorkspacePage(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
 
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "工作区总览", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("ws.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "ws.back", "工作区", "项目文件、索引与目录状态") {
 		a.page = PageChat
 	}
 
@@ -730,7 +746,6 @@ func (a *App) paintWorkspacePage(c *ui.Canvas) {
 		status = "正在扫描目录（后台进行，界面不阻塞）…"
 	}
 	stats := []struct{ label, value string }{
-		{"工作目录", wd},
 		{"文件数", fmt.Sprintf("%d", st.count)},
 		{"总大小", core.HumanSize(st.bytes)},
 		{"大于 1MB", fmt.Sprintf("%d", st.bigCount)},
@@ -745,12 +760,16 @@ func (a *App) paintWorkspacePage(c *ui.Canvas) {
 		if v == "" {
 			v = "—"
 		}
-		statCards = append(statCards, kit.Column(2,
+		statCards = append(statCards, kit.Expanded(kit.Column(2,
 			kit.Label(s.label, ui.FsXs, 400, ui.CurrentTokens().TextTertiary),
 			kit.Label(v, ui.FsMd, 700, ui.CurrentTokens().TextPrimary),
-		))
+		)))
 	}
 	grid := kit.Row(12, statCards...)
+	dirRow := kit.Column(2,
+		kit.Label("工作目录", ui.FsXs, 400, ui.CurrentTokens().TextTertiary),
+		kit.Label(kit.TextTrunc(ktx, wd, ui.FsMd, 700, W-a.railW-120, ui.FaceUI), ui.FsMd, 700, ui.CurrentTokens().TextPrimary),
+	)
 
 	bigRows := []kit.Element{kit.Column(2,
 		kit.Label("Top 大文件", ui.FsSm, 700, ui.CurrentTokens().TextSecondary),
@@ -807,7 +826,7 @@ func (a *App) paintWorkspacePage(c *ui.Canvas) {
 			kit.Button("w:open", "打开目录", kit.ButtonSecondary, func() { revealPath(wd, false) }),
 			kit.Button("w:reindex", "重建索引", kit.ButtonPrimary, func() { a.queueIndexRebuild(wd) }),
 		),
-		kit.Card(10, grid),
+		kit.Card(10, kit.Column(12, dirRow, grid)),
 		kit.Card(10, kit.Column(6, changeRows...)),
 		kit.Card(10, kit.Column(6, bigRows...)),
 	)
@@ -838,12 +857,7 @@ func (a *App) paintCostsPage(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
 
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "成本与预算中心", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("cost.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "cost.back", "费用与预算", "按模型与会话查看花费") {
 		a.page = PageChat
 	}
 

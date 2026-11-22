@@ -169,7 +169,7 @@ func (a *App) cmdUpdateApply(rest string) {
 		a.sysNote("自更新前检查失败：" + err.Error())
 		return
 	}
-	m, newer, err := core.CheckUpdate(core.Version, url, core.HTTPFetcher)
+	uc, newer, err := core.CheckUpdateAny(core.Version, a.cfg.UpdateSource, a.cfg.UpdateRepo, url, core.HTTPFetcher)
 	if err != nil {
 		a.sysNote("检查更新失败：" + err.Error())
 		return
@@ -186,9 +186,9 @@ func (a *App) cmdUpdateApply(rest string) {
 			"配置和会话在用户目录，升级不会丢。")
 		return
 	}
-	f, ok := m.FileFor(runtime.GOARCH)
-	if !ok {
-		a.sysNote(fmt.Sprintf("发布清单里没有 %s 架构的包，已放弃（混装架构会直接起不来）。", runtime.GOARCH))
+	f := uc.File
+	if f.URL == "" || f.SHA256 == "" {
+		a.sysNote(fmt.Sprintf("更新源里没有 %s 架构的包或 SHA256，已放弃。", runtime.GOARCH))
 		return
 	}
 	a.statusMsg = "正在下载更新包…"
@@ -210,7 +210,7 @@ func (a *App) cmdUpdateApply(rest string) {
 		a.sysNote(fmt.Sprintf("新版本 %s 已下载并通过 SHA256 与架构校验。\r\n"+
 			"确认执行：/update apply force\r\n"+
 			"替换期间本窗口会关闭并自动重启；若新版本 30 秒内没起来，脚本会自动回滚到 %s。\r\n"+
-			"会话与配置保存在用户目录，不受影响。", m.Version, core.Version))
+			"会话与配置保存在用户目录，不受影响。", uc.Version, core.Version))
 		return
 	}
 	script, err := core.WriteApplyScript(dir, core.ApplyScript(exe, newExe, true))

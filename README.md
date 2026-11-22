@@ -18,10 +18,12 @@
 </p>
 
 > [!NOTE]
+> **English README**: [README.en.md](README.en.md)（中文仍为项目主语言）。
+>
 > **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
 > 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 >
-> **关于本仓库**：本仓库是 v1.40.0 的快照发布，早期迭代历史未提交到 git；
+> **关于本仓库**：本仓库是 v2.0.0 的快照发布，早期迭代历史未提交到 git；
 > 各版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 `docs/`。
 
 > 上文的“零运行时依赖”指静态链接的单文件 exe。构建期依赖 Go 1.20.14 工具链与
@@ -38,11 +40,11 @@
 <p align="center"><sub>对话界面：代码高亮、工具调用卡片、深色 / 浅色双主题</sub></p>
 
 <p align="center">
-  <img src="assets/screenshots/sessions-dark.png" alt="会话中心" width="32%">
-  <img src="assets/screenshots/settings-dark.png" alt="模型与端点设置" width="32%">
-  <img src="assets/screenshots/appearance-dark.png" alt="外观与交互设置" width="32%">
+  <img src="assets/screenshots/sessions-light.png" alt="会话中心" width="32%">
+  <img src="assets/screenshots/settings-light.png" alt="设置与工具" width="32%">
+  <img src="assets/screenshots/settings-dark.png" alt="深色主题设置" width="32%">
 </p>
-<p align="center"><sub>会话中心 · 模型配置 · 外观设置</sub></p>
+<p align="center"><sub>会话中心 · 设置与工具 · 深色主题设置</sub></p>
 
 <p align="center">
   <img src="assets/screenshots/win7-onboarding.png" alt="Windows 7 SP1 上的首次启动界面" width="72%">
@@ -80,7 +82,7 @@ Windows 7 仍是很多老机器、内网机器和离线环境的唯一选择，�
 | 💾 **安装方式** | 标准安装（当前用户 / 所有用户）或便携安装（U 盘 / 移动硬盘）。 |
 | 🔑 **U 盘模式** | 配置、会话跟着 U 盘走；API Key 用 U 盘密码加密，换电脑输入密码即可。 |
 | 🩺 **端点诊断 `/doctor`** | 分别探测 `/models`、最短对话、工具调用，直接显示上游错误。 |
-| ⬆️ **自更新** | Ed25519 签名清单 + SHA256 校验；清单由 Release 提供，仅在发布 `latest.json` 后可用。所有用户安装会提示用安装包升级。 |
+| ⬆️ **自更新** | 默认 GitHub Releases + `SHA256SUMS.txt` 校验（可填 `owner/repo`，支持自动下载并暂存，重启后安装）；可选 Ed25519 签名清单源。所有用户安装会提示用安装包升级。 |
 | 📴 **可离线** | 本地模型（Ollama / LM Studio / vLLM）不需要任何云端 Key。 |
 
 ## 架构一览

@@ -331,7 +331,7 @@ func (u *UI) Button(id, label string, r ui.Rect, kind ButtonKind) bool {
 		label = ellipsis(u.c, label, ui.FsSm, 500, r.W-16)
 	}
 	w := u.c.MeasureFace(label, ui.FsSm, 500, ui.FaceUI)
-	u.c.TextFace(r.CX()-w/2, r.CY()-8, label, ui.FsSm, 500, fg, ui.FaceUI)
+	u.c.TextFace(r.CX()-w/2, ui.TextTop(u.c, r, ui.FsSm), label, ui.FsSm, 500, fg, ui.FaceUI)
 	return !disabled && u.click == id
 }
 
@@ -367,7 +367,7 @@ func (u *UI) IconButton(id string, r ui.Rect, glyph string, active bool) bool {
 		drawIcon(u.c, ik, ui.R(r.CX()-8, r.CY()-8, 16, 16), fg)
 	} else {
 		w := u.c.MeasureFace(glyph, ui.FsSm, 500, ui.FaceUI)
-		u.c.TextFace(r.CX()-w/2, r.CY()-8, glyph, ui.FsSm, 500, fg, ui.FaceUI)
+		u.c.TextFace(r.CX()-w/2, ui.TextTop(u.c, r, ui.FsSm), glyph, ui.FsSm, 500, fg, ui.FaceUI)
 	}
 	return u.click == id
 }

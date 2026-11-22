@@ -97,6 +97,9 @@ func TrayAdd(hwnd HWND, hicon HICON, tip string) bool {
 	d.UID = trayID
 	d.UFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
 	d.UCallbackMessage = TrayMsg
+	if hicon == 0 {
+		hicon = LoadDefaultIcon()
+	}
 	d.HIcon = hicon
 	copyUTF16(d.SzTip[:], tip)
 	return shellNotify(NIM_ADD, &d)

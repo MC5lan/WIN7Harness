@@ -451,6 +451,9 @@ func (a *App) convKey() string {
 // 增量策略：按消息缓存分段结果，内容签名不变就整段复用；只有变化的尾段会重新
 // 解析 Markdown 与测量字形。长会话（上千条）流式输出时，帧耗时从 O(全部) 降到 O(1)。
 func (a *App) layoutSession(c *ui.Canvas) {
+	if c == nil {
+		return
+	}
 	pad := int32(48)
 	if a.dense() {
 		pad = 40
@@ -493,6 +496,9 @@ func (a *App) layoutSession(c *ui.Canvas) {
 
 	for mi := range a.msgs {
 		m := &a.msgs[mi]
+		if m == nil {
+			continue
+		}
 		var seg laySeg
 		if plan[mi] && mi < len(prev) {
 			seg = prev[mi]

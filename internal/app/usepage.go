@@ -24,12 +24,7 @@ func (a *App) paintUsage(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
 
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "用量与性能", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("use.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "use.back", "用量与性能", "token、调用次数与响应时间") {
 		a.page = PageChat
 	}
 
@@ -63,7 +58,12 @@ func (a *App) paintUsage(c *ui.Canvas) {
 
 	var body kit.Element
 	if a.eng == nil {
-		body = usageEmpty(ktx, "模型还没配置", "配好模型并聊过一轮之后，这里才有数据。")
+		body = kit.Column(12,
+			usageEmpty(ktx, "模型还没配置", "配好模型并聊过一轮之后，这里才有数据。"),
+			kit.Row(10, kit.Spacer(),
+				kit.Button("use.setup", "去配置模型", kit.ButtonPrimary, func() { a.page = PageSettings }),
+				kit.Spacer()),
+		)
 	} else if a.useTab == useTabCost {
 		body = a.usageCostBody(ktx)
 	} else if a.useTab == useTabPerf {

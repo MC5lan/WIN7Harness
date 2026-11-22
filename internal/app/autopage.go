@@ -25,12 +25,8 @@ func (a *App) paintAuto(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
 
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "自动化", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("auto.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	// 顶栏：统一样式
+	if a.paintPageHeader(u, "auto.back", "定时任务", "让助手按计划自动执行") {
 		a.page = PageChat
 	}
 
@@ -58,7 +54,11 @@ func (a *App) paintAuto(c *ui.Canvas) {
 		if counts[i] > 0 {
 			lbl = fmt.Sprintf("%s · %d", t.label, counts[i])
 		}
-		tabEls = append(tabEls, kit.Button(t.id, lbl, kit.ButtonSecondary, func() { a.autoTab = tabs[i].idx }))
+		kind := kit.ButtonSecondary
+		if a.autoTab == t.idx {
+			kind = kit.ButtonPrimary
+		}
+		tabEls = append(tabEls, kit.Button(t.id, lbl, kind, func() { a.autoTab = tabs[i].idx }))
 	}
 
 	// 主体：按 tab 渲染列表

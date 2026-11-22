@@ -72,11 +72,7 @@ func (a *App) paintCompare(c *ui.Canvas) {
 	// 左侧栏：全屏页之间也能直接互跳，不必先退回对话。
 	a.paintRail(u, H)
 
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "并列查看", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("cmp.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "cmp.back", "并列查看", "并排比较两个会话") {
 		a.page = PageChat
 	}
 
@@ -91,7 +87,7 @@ func (a *App) paintCompare(c *ui.Canvas) {
 	ktx.Painter = kit.NewCanvasAdapter(c)
 	ktx.BeginFrame()
 
-	row := kit.Row(12, comparePane(left, "当前会话"), comparePane(right, "对照会话"))
+	row := kit.Row(12, kit.Expanded(comparePane(left, "当前会话")), kit.Expanded(comparePane(right, "对照会话")))
 	head := kit.Row(8,
 		kit.Label("左栏是本轮当前会话 · 右栏是 /compare N 指定的对照", ui.FsXs, 400, ui.CurrentTokens().TextTertiary),
 	)
@@ -138,9 +134,8 @@ func comparePane(cv *Conv, label string) kit.Element {
 
 	rows := []kit.Element{}
 	for _, m := range cv.Msgs {
-		text := strings.TrimSpace(strings.ReplaceAll(m.Text, "\r\n", " "))
-		text = strings.ReplaceAll(text, "\n", " ")
-		if text == "" {
+		lines := markdownLines(m.Text)
+		if len(lines) == 0 {
 			continue
 		}
 		prefix := "· "
@@ -152,9 +147,11 @@ func comparePane(cv *Conv, label string) kit.Element {
 			prefix = "AI："
 			col = tk.TextSecondary
 		}
-		for _, chunk := range wrapCmpsText(text, 72) {
-			rows = append(rows, kit.Label(prefix+chunk, ui.FsXs, 400, col))
-			prefix = "   "
+		for _, ln := range lines {
+			for _, chunk := range wrapCmpsText(ln, 60) {
+				rows = append(rows, kit.Label(prefix+chunk, ui.FsXs, 400, col))
+				prefix = "    "
+			}
 		}
 	}
 	if len(rows) == 0 {

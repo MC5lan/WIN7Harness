@@ -146,6 +146,10 @@ var (
 	FaceUI    = "Microsoft YaHei UI"
 	FaceMono  = "Consolas"
 	FaceEmoji = "Segoe UI Symbol"
+	// FaceDisplay 是品牌艺术字（引导页产品名）的展示字体，Segoe UI Black 为几何粗体。
+	// 目标机缺失时 InitFonts 回退到 FaceUI，并改用粗体字重。
+	FaceDisplay   = "Segoe UI Black"
+	WeightDisplay = int32(400)
 )
 
 // 字号（逻辑像素）

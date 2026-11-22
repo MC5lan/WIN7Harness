@@ -20,7 +20,7 @@ func (a *App) settingsSignature() uint64 {
 		"set.base", "set.key", "set.model", "set.dir", "set.temp", "set.maxtok",
 		"set.maxcost", "set.budget", "set.rounds", "set.ctxwin", "set.subto",
 		"set.pricein", "set.priceout", "set.sysprompt", "set.toolprofile",
-		"set.proxyurl", "set.tlsca",
+		"set.proxyurl", "set.tlsca", "set.updrepo", "set.url",
 	} {
 		if f := a.ui.Field(id, ""); f != nil {
 			write(string(f.Text))
@@ -38,6 +38,9 @@ func (a *App) settingsSignature() uint64 {
 		write(a.cfg.ProxyMode)
 		write(fmt.Sprint(a.cfg.LowMemory))
 		write(fmt.Sprint(a.cfg.NoFoldTools))
+		write(a.cfg.UpdateSource)
+		write(fmt.Sprint(a.cfg.CheckUpdateOnStart))
+		write(fmt.Sprint(a.cfg.AutoDownloadUpdate))
 	}
 	return h.Sum64()
 }

@@ -142,10 +142,13 @@ type App struct {
 	// —— v1.28 动态 ——
 	trayInit bool
 	trayOn   bool
-	lastDiag time.Time
-	qr       *core.QRCode
-	qrURL    string
-	qrUntil  time.Time
+	// trayFails 记录托盘挂载失败次数：Explorer 重启/桌面未就绪时首次
+	// Shell_NotifyIconW 可能失败，后面几帧再试，避免“右下角永远看不到图标”。
+	trayFails int
+	lastDiag  time.Time
+	qr        *core.QRCode
+	qrURL     string
+	qrUntil   time.Time
 
 	msgs []Message
 
@@ -316,7 +319,9 @@ type App struct {
 	inputPinScroll  bool  // 滚轮手动滚动后暂不强制游标可见（下次编辑复位）
 
 	// 表单（引导页 / 设置页）
-	presetIdx      int
+	presetIdx int
+	// onbStep 是引导页当前步骤：0 品牌欢迎页，1 连接模型（调试）。
+	onbStep        int
 	testMsg        string
 	testOK         *bool
 	testing        bool

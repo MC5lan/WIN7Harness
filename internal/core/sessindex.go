@@ -102,8 +102,7 @@ func previewText(t string) string {
 	if t == "" {
 		return ""
 	}
-	t = strings.ReplaceAll(t, "\r", " ")
-	t = strings.ReplaceAll(t, "\n", " ")
+	t = strings.NewReplacer("```", "", "`", "", "**", "", "__", "", "\r", " ", "\n", " ").Replace(t)
 	r := []rune(t)
 	if len(r) > 48 {
 		return string(r[:48]) + "…"

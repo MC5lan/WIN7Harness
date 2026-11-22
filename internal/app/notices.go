@@ -29,11 +29,7 @@ func (a *App) paintNotices(c *ui.Canvas) {
 
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	a.paintRail(u, H)
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "通知中心", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("notice.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "notice.back", "通知中心", "更新与系统提醒") {
 		a.page = PageChat
 	}
 

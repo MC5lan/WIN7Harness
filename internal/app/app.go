@@ -285,13 +285,16 @@ func easeOut(t float32) float32 {
 
 // 面板尺寸常量：宽度是 96dpi 逻辑像素，绘制时由画布按 DPI 缩放。
 const (
-	defSideW   int32 = 264 // 侧栏默认宽度（DESIGN 第 5 节）
-	defInspW   int32 = 320 // 检查器默认宽度（DESIGN 第 5 节）
-	minSideW   int32 = 180
-	maxSideW   int32 = 460
-	minInspW   int32 = 200
-	maxInspW   int32 = 560
-	railPanelW int32 = 56
+	defSideW int32 = 264 // 侧栏默认宽度（DESIGN 第 5 节）
+	defInspW int32 = 320 // 检查器默认宽度（DESIGN 第 5 节）
+	minSideW int32 = 180
+	maxSideW int32 = 460
+	minInspW int32 = 200
+	maxInspW int32 = 560
+	// railPanelW 是唯一的左侧栏宽度。v1.40.1 起取消「图标 rail + 会话侧栏」
+	// 两层结构：新建会话、最近会话、全部会话、工作区、设置与工具全部在同一栏里，
+	// 视觉与信息架构对齐 WorkBuddy（见 docs/UI重设计-v1.40.1.md）。
+	railPanelW int32 = 264
 	minChatW   int32 = 520 // 主区最小宽度（DESIGN 第 5 节）
 	handleGrab int32 = 5   // 分隔条抓取半径
 )
@@ -406,7 +409,14 @@ func (a *App) pushInputUndo() {
 func (a *App) pageDefaultAction() {
 	switch a.page {
 	case PageOnboard:
-		a.finishOnboard()
+		switch {
+		case a.onbStep == 0:
+			a.onbGo(1)
+		case a.ui.Focus() == "ob.back":
+			a.onbGo(0)
+		default:
+			a.finishOnboard()
+		}
 	case PageSettings:
 		a.saveSettings()
 	case PageDiag, PageCompare, PageAuto, PageExt, PageUsage, PageNotices:
@@ -822,6 +832,9 @@ func (a *App) toggleTheme() {
 	}
 	a.th = ui.ResolveTheme(a.cfg.Theme)
 	_ = a.cfg.Save()
+	// 整套配色换了：必须整帧重绘，否则未变化的命令会残留旧主题的像素。
+	a.forceFull = true
+	a.Redraw()
 }
 
 /* ---------------- 弹窗 ---------------- */
@@ -961,6 +974,18 @@ func (a *App) paintModal(c *ui.Canvas) {
 
 func (a *App) modalClick(x, y int32) {
 	id := a.ui.HandleClick(x, y)
+	// 兜底：模态的命中区必须最后注册，但在某些绘制时序（图层重放、
+	// 上一帧页面按钮残留）下 HitAt 可能返回下层控件。直接用按钮几何再判一次，
+	// 保证「允许执行 / 取消」鼠标点击一定有效，不用先 Tab 切焦点。
+	if id == "" {
+		r := a.modalRect()
+		by := r.Bottom() - 60
+		if ui.R(r.Right()-118, by, 94, 34).Contains(x, y) {
+			id = "modal.ok"
+		} else if ui.R(r.Right()-220, by, 94, 34).Contains(x, y) {
+			id = "modal.cancel"
+		}
+	}
 	if a.modal != nil && a.modal.Kind == modalPassword {
 		switch id {
 		case "modal.pwd.ok":
@@ -1037,7 +1062,12 @@ func (a *App) paintToast(c *ui.Canvas) {
 		rw = a.winW - 100
 		msg = ellipsis(c, msg, ui.FsSm, 400, rw-32)
 	}
-	r := ui.R((a.winW-rw)/2, a.winH-140, rw, 34)
+	ty := a.winH - 140
+	if a.page == PageOnboard {
+		// 引导页的底部就是「上一步 / 开始使用」，提示改到顶部，免得压住按钮。
+		ty = 24
+	}
+	r := ui.R((a.winW-rw)/2, ty, rw, 34)
 	bg := th.Card
 	if a.tst.Err {
 		bg = ui.Blend(th.Card, th.Danger, 0.35)

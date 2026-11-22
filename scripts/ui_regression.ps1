@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Exe = (Join-Path $PSScriptRoot '..\dist\WIN7Harness-amd64.exe'),
   [string]$OutDir = '',
   [double]$DPI = 1.0
@@ -80,6 +80,40 @@ function Shot([IntPtr]$h, [string]$name) {
   $g.Dispose()
   $bmp.Save((Join-Path $shots $name), [System.Drawing.Imaging.ImageFormat]::Png)
   $bmp.Dispose()
+}
+function WaitLog([string]$pattern, [int]$timeoutMs) {
+  $deadline = (Get-Date).AddMilliseconds($timeoutMs)
+  while ((Get-Date) -lt $deadline) {
+    if ((LogText (Join-Path $TestHome 'harness.log')) -match $pattern) { return $true }
+    Start-Sleep -Milliseconds 100
+  }
+  return $false
+}
+function PageName {
+  $lp = Join-Path $TestHome 'harness.log'
+  if (!(Test-Path $lp)) { return '' }
+  $m = Get-Content $lp | Select-String '\[page\] (\w+)' | Select-Object -Last 1
+  if ($m) { return $m.Matches[0].Groups[1].Value }
+  return ''
+}
+function CheckPage([string]$name) {
+  $got = PageName
+  Check ('page-' + $name) ($got -eq $name) ("actual=" + $got)
+}
+# 启动/切页有异步绘制，冷启动时第一次点击偶发丢失（386 上更明显）。
+# 最多点 3 次，并以 harness.log 的 [page] 为准确认；重试次数写进 detail，
+# 既不把偶发丢帧误报成功能失败，也不掩盖真正的“点不动”。
+function EnsurePage([string]$name, [int]$x, [int]$y) {
+  for ($i = 0; $i -lt 3; $i++) {
+    ClickAt $hwnd $x $y
+    Start-Sleep -Milliseconds 600
+    if ((PageName) -eq $name) {
+      Check ('page-' + $name) $true ("retries=" + $i)
+      return $true
+    }
+  }
+  Check ('page-' + $name) $false ("actual=" + (PageName) + " retries=3")
+  return $false
 }
 function LogText([string]$path) {
   if (!(Test-Path $path)) { return '' }
@@ -174,34 +208,75 @@ try {
   # 设置入口固定在左下角（v1.32）。启动后 61 个会话还在后台补全，
   # 给 UI 线程留出处理完首批绘制的时间，再点左下角整块设置热区。
   Start-Sleep -Seconds 3
-  ClickAt $hwnd 28 ($lh - 100)
-  Start-Sleep -Seconds 1
+  [void](EnsurePage 'settings' 132 ($lh - 42))
   Shot $hwnd 'page-settings.png'
-  $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-  Check 'page-settings' ($proc -and $proc.Responding) ''
 
-  $pages = @(
-    @{ name = 'diag'; x = 28; y = 138 },
-    @{ name = 'auto'; x = 28; y = 178 },
-    @{ name = 'ext'; x = 28; y = 218 },
-    @{ name = 'usage'; x = 28; y = 258 },
-    @{ name = 'workspace'; x = 28; y = 338 },
-    @{ name = 'costs'; x = 28; y = 378 },
-    @{ name = 'notices'; x = 28; y = 418 }
-  )
+  # v1.39：左侧不再有 7 个图标按钮，全部二级页面都在「设置 → 工具」里，
+  # 用真实文字 + 说明进入。坐标按窗口宽度推算，避免写死像素随 DPI 漂移。
+  $railW = 264
+  $cwSet = [Math]::Min(920, $lw - $railW - 48)
+  $setX = $railW + [int][Math]::Floor(($lw - $railW - $cwSet) / 2)
+  $tabW = [int][Math]::Floor($cwSet / 7)
+  $toolsTabX = $setX + 6 * $tabW + [int][Math]::Floor($tabW / 2)
+  # 设置页工具卡片按内容宽度自动切 2 / 3 列；DPI>1 时逻辑窗口更窄，必须同步。
+  $cols = 2
+  if ($cwSet -ge 760) { $cols = 3 }
+  $cellW = [int][Math]::Floor((($cwSet - 18) - 44 - 12 * ($cols - 1)) / $cols)
+  $cellX = $setX + 22
+  $cellY = 168
+  if ($cols -eq 3) {
+    $pages = @(
+      @{ name = 'diag'; col = 0; row = 0 },
+      @{ name = 'auto'; col = 1; row = 0 },
+      @{ name = 'ext'; col = 2; row = 0 },
+      @{ name = 'usage'; col = 0; row = 1 },
+      @{ name = 'workspace'; col = 1; row = 1 },
+      @{ name = 'costs'; col = 2; row = 1 },
+      @{ name = 'notices'; col = 0; row = 2 }
+    )
+  } else {
+    $pages = @(
+      @{ name = 'diag'; col = 0; row = 0 },
+      @{ name = 'auto'; col = 1; row = 0 },
+      @{ name = 'ext'; col = 0; row = 1 },
+      @{ name = 'usage'; col = 1; row = 1 },
+      @{ name = 'workspace'; col = 0; row = 2 },
+      @{ name = 'costs'; col = 1; row = 2 },
+      @{ name = 'notices'; col = 0; row = 3 }
+    )
+  }
   foreach ($pg in $pages) {
-    ClickAt $hwnd $pg.x $pg.y
-    Start-Sleep -Milliseconds 600
+    for ($attempt = 0; $attempt -lt 2; $attempt++) {
+      [void](EnsurePage 'settings' 132 ($lh - 42))
+      # 等「工具与面板」页签真正生效；高负载下绘制慢半拍，直接点会误触
+      # 模型页的「选择目录」等原生对话框，把进程卡成“未响应”。
+      for ($tabTry = 0; $tabTry -lt 3 -and !(WaitLog '\[settings-tab\] 6' 1500); $tabTry++) {
+        ClickAt $hwnd $toolsTabX 84
+      }
+      # 日志写入发生在绘制之前；高负载下再等一帧，确保卡片命中区已注册。
+      Start-Sleep -Milliseconds 400
+      ClickAt $hwnd ($cellX + $pg.col * ($cellW + 12) + 120) ($cellY + $pg.row * 80 + 35)
+      Start-Sleep -Milliseconds 600
+      if ((PageName) -eq $pg.name) { break }
+    }
     WheelAt -h $hwnd -x 640 -y 360 -notches 6
     Start-Sleep -Milliseconds 500
     Shot $hwnd ('page-' + $pg.name + '.png')
-    $proc = Get-Process -Id $p.Id -ErrorAction SilentlyContinue
-    Check ('page-' + $pg.name) ($proc -and $proc.Responding) ''
+    CheckPage $pg.name
   }
 
+  # 工作区和会话同属左侧单栏，位于「设置与工具」上方。
+  ClickAt $hwnd 132 ($lh - 86)
+  Start-Sleep -Milliseconds 800
+  WheelAt -h $hwnd -x 640 -y 360 -notches 6
+  Start-Sleep -Milliseconds 400
+  Shot $hwnd 'page-workspace.png'
+  CheckPage 'workspace'
+
   # Sessions: list, hover actions, lazy open of an older (unhydrated) session.
-  ClickAt $hwnd 28 298
+  ClickAt $hwnd 132 ($lh - 130)
   Start-Sleep -Seconds 2
+  CheckPage 'sessions'
   MoveAt $hwnd 260 200
   Shot $hwnd 'page-sessions.png'
   WheelAt -h $hwnd -x 640 -y 360 -notches 60
@@ -220,7 +295,7 @@ try {
   Check 'lazy-session-open' ($log -match 'session-loaded') ''
 
   # Kit page back button must be handled by classic top bar.
-  ClickAt $hwnd 28 298
+  ClickAt $hwnd 132 ($lh - 130)
   Start-Sleep -Milliseconds 800
   ClickAt $hwnd ($lw - 82) 29
   Start-Sleep -Milliseconds 900

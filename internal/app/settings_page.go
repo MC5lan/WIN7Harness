@@ -5,7 +5,6 @@ package app
 import (
 	"fmt"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"win7harness/internal/core"
@@ -20,12 +19,13 @@ var settingsTabs = []struct {
 	key   string
 	label string
 }{
-	{"model", "模型"},
-	{"look", "外观"},
-	{"perm", "权限"},
-	{"network", "网络"},
-	{"budget", "预算"},
-	{"advanced", "高级"},
+	{"model", "模型与上下文"},
+	{"look", "界面与体验"},
+	{"perm", "权限与安全"},
+	{"network", "网络与更新"},
+	{"budget", "预算与成本"},
+	{"auto", "自动化"},
+	{"tools", "工具与关于"},
 }
 
 type settingsPane struct {
@@ -59,17 +59,16 @@ func (a *App) paintSettings(c *ui.Canvas) {
 	// 顶栏兜底命中区必须先登记：UI.HitAt 从后往前找，后登记的按钮才能优先。
 	// 之前放在函数末尾，整条顶栏把“保存/返回”按钮吃掉了，点哪都没反应。
 	a.ui.Hit("set.top", ui.R(a.railW, 0, W-a.railW, 56))
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 15, "设置", ui.FsLg, 700, th.Text, ui.FaceUI)
-	c.TextFace(a.railW+56+c.MeasureFace("设置", ui.FsLg, 700, ui.FaceUI)+14, 20,
+	c.TextFace(a.railW+24, 15, "设置与工具", ui.FsLg, 700, th.Text, ui.FaceUI)
+	c.TextFace(a.railW+24+c.MeasureFace("设置与工具", ui.FsLg, 700, ui.FaceUI)+14, 20,
 		"模型、外观、权限、网络与预算集中在这里 · Ctrl+, 打开", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	if label := a.settingsDirtyLabel(); label != "" {
-		c.TextFace(W-318, 20, label, ui.FsXs, 500, th.Warn, ui.FaceUI)
+		c.TextFace(W-360, 20, label, ui.FsXs, 500, th.Warn, ui.FaceUI)
 	}
-	if u.Button("set.save.top", "保存", ui.R(W-206, 14, 84, 30), BtnPrimary) {
+	if u.Button("set.save.top", "保存设置", ui.R(W-232, 14, 104, 30), BtnPrimary) {
 		a.queueUI(a.saveSettings)
 	}
-	if u.Button("set.back", "← 返回对话", ui.R(W-114, 14, 102, 30), BtnGhost) {
+	if u.Button("set.back", "返回对话", ui.R(W-114, 14, 102, 30), BtnGhost) {
 		if note := a.settingsDiscardNote(); note != "" {
 			a.toast(note, true)
 		}
@@ -87,7 +86,7 @@ func (a *App) paintSettings(c *ui.Canvas) {
 	}
 	x := a.railW + (W-a.railW-cw)/2
 
-	// 顶部页签：与内容同宽，选中态用暖珊瑚底 + 下划线。
+	// 顶部页签：与内容同宽，选中态用珊瑚实底，和其它页面的页签保持一致。
 	tabY := int32(66)
 	tabH := int32(36)
 	tw := cw / int32(len(settingsTabs))
@@ -100,15 +99,13 @@ func (a *App) paintSettings(c *ui.Canvas) {
 		hover := u.Hit("set.tab."+t.key, r)
 		hvt := u.hoverT("set.tab." + t.key)
 		if active {
-			c.Round(r, 8, th.AccentSoft)
-			c.RoundStroke(r, 8, ui.Blend(th.BorderSoft, th.Accent, 0.35))
-			c.FillRect(ui.R(r.X+14, r.Bottom()-2, r.W-28, 2), th.Accent)
+			c.Round(r, 8, th.Accent)
 		} else if hvt > 0 {
 			c.Round(r, 8, ui.Blend(th.Card, th.CardHover, hvt*0.8))
 		}
 		col := th.TextDim
 		if active {
-			col = th.AccentText
+			col = 0xFFFFFF
 		} else if hover {
 			col = th.Text
 		}
@@ -116,6 +113,7 @@ func (a *App) paintSettings(c *ui.Canvas) {
 		c.TextFace(r.CX()-fw/2, r.Y+9, t.label, ui.FsSm, 700, col, ui.FaceUI)
 		if u.Clicked("set.tab."+t.key) && !active {
 			a.settingsTab = i
+			core.Logf("[settings-tab] %d %s", i, t.label)
 			a.settingsScrl = 0
 			// 页签切换后内容整块替换，必须全帧重绘，避免旧页签的卡片残影。
 			a.forceFull = true
@@ -138,7 +136,10 @@ func (a *App) paintSettings(c *ui.Canvas) {
 	case 4:
 		a.settingsBudgetTab(p)
 	case 5:
-		a.settingsAdvancedTab(p)
+		a.settingsAutomation(p)
+		a.settingsHooks(p)
+	case 6:
+		a.settingsToolsTab(p)
 	default:
 		a.settingsModelTab(p)
 	}
@@ -260,11 +261,17 @@ func (a *App) settingsModelTab(p *settingsPane) {
 	f := u.Field("set.key", "")
 	f.Masked = true
 	u.TextField("set.key", ui.R(ix, iy, iw-100, 34), "", "sk-...")
-	if u.Button("set.eye", "显示", ui.R(ix+iw-92, iy, 44, 34), BtnGhost) {
+	eyeLabel := "显示密钥"
+	if !f.Masked {
+		eyeLabel = "隐藏密钥"
+	}
+	if u.Button("set.eye", eyeLabel, ui.R(ix+iw-92, iy, 64, 34), BtnGhost) {
 		f.Masked = !f.Masked
 	}
 	iy += 44
 	a.settingsModelBottom(c, u, ix, iw, iy)
+	a.settingsModelExtras(p)
+	a.settingsContextPresets(p)
 }
 
 // settingsModelBottom 绘制便携密钥状态、模型 ID、工作目录与测试按钮。
@@ -275,7 +282,7 @@ func (a *App) settingsModelBottom(c *ui.Canvas, u *UI, ix, iw, iy int32) {
 		if core.PortableSecretsLocked() {
 			c.TextFace(ix, iy, ellipsis(c, "U 盘密钥未解锁；调用模型前需要输入 U 盘密码", ui.FsXs, 400, iw-90),
 				ui.FsXs, 400, th.Danger, ui.FaceUI)
-			if u.Button("set.pwd.unlock", "解锁", ui.R(ix+iw-72, iy-5, 64, 28), BtnGhost) {
+			if u.Button("set.pwd.unlock", "解锁密钥", ui.R(ix+iw-88, iy-5, 80, 28), BtnGhost) {
 				a.openUnlockModal(func() {
 					a.ui.SetField("set.key", a.cfg.Provider().APIKey)
 					a.toast("API Key 已解锁", false)
@@ -304,10 +311,10 @@ func (a *App) settingsModelBottom(c *ui.Canvas, u *UI, ix, iw, iy int32) {
 		modelW = 180
 	}
 	u.TextField("set.model", ui.R(ix, iy, modelW, 34), "", "模型 ID")
-	if u.Button("set.models.fetch", "拉取", ui.R(ix+modelW+8, iy, 68, 34), BtnGhost) {
+	if u.Button("set.models.fetch", "拉取模型", ui.R(ix+modelW+8, iy, 80, 34), BtnGhost) {
 		a.fetchModels(u.Field("set.base", "").String(), u.Field("set.key", "").String(), false)
 	}
-	if u.Button("set.models.pick", "选择", ui.R(ix+modelW+82, iy, 68, 34), BtnGhost) {
+	if u.Button("set.models.pick", "选择模型", ui.R(ix+modelW+94, iy, 80, 34), BtnGhost) {
 		a.openFetchedModelMenu(ui.R(ix+modelW+82, iy, 68, 34), u.Field("set.base", "").String(), false)
 	}
 	iy += 44
@@ -330,7 +337,7 @@ func (a *App) settingsModelBottom(c *ui.Canvas, u *UI, ix, iw, iy int32) {
 		"新会话默认目录，可在顶栏单独切换", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 18
 	u.TextField("set.dir", ui.R(ix, iy, iw-156, 34), "", "")
-	if u.Button("set.browsedir", "选择…", ui.R(ix+iw-148, iy, 72, 34), BtnGhost) {
+	if u.Button("set.browsedir", "选择目录", ui.R(ix+iw-168, iy, 80, 34), BtnGhost) {
 		a.queueUI(func() {
 			var (
 				d  string
@@ -345,19 +352,19 @@ func (a *App) settingsModelBottom(c *ui.Canvas, u *UI, ix, iw, iy int32) {
 			}
 		})
 	}
-	if u.Button("set.opendir", "打开", ui.R(ix+iw-72, iy, 72, 34), BtnGhost) {
+	if u.Button("set.opendir", "打开目录", ui.R(ix+iw-80, iy, 72, 34), BtnGhost) {
 		win32.ShellOpen(u.Field("set.dir", "").String())
 	}
 	iy += 48
 
-	if u.Button("set.test", "测试连接", ui.R(ix, iy, 96, 32), BtnSubtle) {
+	if u.Button("set.test", "测试连接", ui.R(ix, iy, 96, 32), BtnGhost) {
 		a.testConnection(strings.TrimSpace(u.Field("set.base", "").String()),
 			strings.TrimSpace(u.Field("set.key", "").String()), strings.TrimSpace(u.Field("set.model", "").String()))
 	}
-	if u.Button("set.doctor", "诊断", ui.R(ix+104, iy, 64, 32), BtnGhost) {
+	if u.Button("set.doctor", "诊断连接", ui.R(ix+104, iy, 80, 32), BtnGhost) {
 		a.cmdDoctorForm()
 	}
-	c.TextFace(ix+180, iy+8, ellipsis(c, "测试会发一条最短对话（约几个 token）；诊断会测 /models、对话和工具", ui.FsXs, 400, iw-180), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(ix+196, iy+8, ellipsis(c, "测试会发一条最短对话（约几个 token）；诊断会测 /models、对话和工具", ui.FsXs, 400, iw-196), ui.FsXs, 400, th.TextMute, ui.FaceUI)
 }
 func (a *App) settingsLookTab(p *settingsPane) {
 	c, u := p.c, p.u
@@ -442,41 +449,8 @@ func (a *App) settingsLookTab(p *settingsPane) {
 	c.TextFace(ix+170, iy+4, "老显卡/16bpp/远程桌面下更稳；默认矢量渲染更细腻", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 38
 
-	verifyOn := strings.EqualFold(a.cfg.VerifyMode, "auto")
-	c.TextFace(ix, iy+4, "自动验证（改完跑测试）", ui.FsSm, 400, th.Text, ui.FaceUI)
-	if v := u.ToggleHit("set.verify", ui.R(ix, iy-4, 500, 28), ui.R(ix+170, iy, 38, 20), verifyOn); v != verifyOn {
-		if a.streaming || (a.eng != nil && a.eng.Running()) {
-			a.toast("生成中不能切换自动验证，先停止或等本轮结束", true)
-		} else {
-			if v {
-				a.cfg.VerifyMode = "auto"
-			} else {
-				a.cfg.VerifyMode = "off"
-			}
-			if a.eng != nil {
-				a.eng.VerifyMode = a.cfg.VerifyMode
-			}
-			if err := a.cfg.Save(); err != nil {
-				a.toast("保存失败："+err.Error(), true)
-			}
-		}
-	}
-	c.TextFace(ix+220, iy+4, "模型准备收尾时自动构建+测试；失败把摘要回灌继续修（最多 3 轮）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	iy += 38
+	a.settingsAutomation(p)
 
-	c.TextFace(ix, iy+4, "子任务并行上限", ui.FsSm, 400, th.Text, ui.FaceUI)
-	if u.Button("set.st-", "−", ui.R(ix+120, iy, 26, 24), BtnGhost) {
-		if a.cfg.MaxSubTasks > 1 {
-			a.cfg.MaxSubTasks--
-		}
-	}
-	c.TextFace(ix+160, iy+5, strconv.Itoa(a.cfg.MaxSubTasks), ui.FsSm, 700, th.Text, ui.FaceMono)
-	if u.Button("set.st+", "+", ui.R(ix+186, iy, 26, 24), BtnGhost) {
-		if a.cfg.MaxSubTasks < 8 {
-			a.cfg.MaxSubTasks++
-		}
-	}
-	c.TextFace(ix+222, iy+4, "1~8，task 批量派发的并发数", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	_ = iw
 }
 
@@ -581,8 +555,8 @@ func (a *App) settingsNetTab(p *settingsPane) {
 	c.TextFace(ix+c.MeasureFace("补充根证书（PEM）", ui.FsXs, 500, ui.FaceUI)+14, iy,
 		"Win7 根证书库停在 2009；公司代理/杀软 MITM 时把它自己的根 CA 填这里", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 18
-	u.TextField("set.tlsca", ui.R(ix, iy, iw-70, 32), "", `C:\certs\corp-root.pem`)
-	if u.Button("set.tlsca-pick", "浏览", ui.R(ix+iw-62, iy, 62, 32), BtnGhost) {
+	u.TextField("set.tlsca", ui.R(ix, iy, iw-100, 32), "", `C:\certs\corp-root.pem`)
+	if u.Button("set.tlsca-pick", "选择证书", ui.R(ix+iw-92, iy, 84, 32), BtnGhost) {
 		a.queueUI(func() {
 			a.beginNativeDialog()
 			picked := win32.OpenCertDialog(0, "选择根证书")
@@ -602,6 +576,54 @@ func (a *App) settingsNetTab(p *settingsPane) {
 		}
 	}
 	c.TextFace(ix+170, iy+3, "仅排障用；默认关闭，避免中间人证书被静默接受", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+
+	// —— 自动更新（GitHub Releases + SHA256SUMS）——
+	rUpd := p.card("自动更新", 250)
+	ux := rUpd.X + 22
+	uy := rUpd.Y + CardBodyY
+	c.TextFace(ux, uy, "更新源", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	sources := []struct {
+		id, label, val string
+	}{
+		{"set.updsrc.gh", "GitHub Releases", core.UpdateSourceGitHub},
+		{"set.updsrc.mf", "签名清单", core.UpdateSourceManifest},
+	}
+	px = ux + 80
+	for _, s := range sources {
+		kind := BtnGhost
+		if strings.EqualFold(a.cfg.UpdateSource, s.val) {
+			kind = BtnPrimary
+		}
+		if u.Button(s.id, s.label, ui.R(px, uy-6, 132, 30), kind) {
+			a.cfg.UpdateSource = s.val
+			a.forceFull = true
+			a.Redraw()
+		}
+		px += 140
+	}
+	uy += 42
+	c.TextFace(ux, uy, "GitHub 仓库", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	u.TextField("set.updrepo", ui.R(ux+100, uy-8, 320, 32), "", core.DefaultUpdateRepo)
+	c.TextFace(ux+432, uy+2, "owner/repo；GitHub 只做发现，包必须带 SHA256SUMS.txt", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	uy += 46
+	if v := u.ToggleHit("set.updcheck", ui.R(ux, uy-6, 420, 28), ui.R(ux+120, uy, 38, 20), a.cfg.CheckUpdateOnStart); v != a.cfg.CheckUpdateOnStart {
+		a.cfg.CheckUpdateOnStart = v
+	}
+	c.TextFace(ux+170, uy+2, "启动时检查一次更新", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	uy += 34
+	if v := u.ToggleHit("set.updauto", ui.R(ux, uy-6, 420, 28), ui.R(ux+120, uy, 38, 20), a.cfg.AutoDownloadUpdate); v != a.cfg.AutoDownloadUpdate {
+		a.cfg.AutoDownloadUpdate = v
+	}
+	c.TextFace(ux+170, uy+2, "发现新版本时自动下载并校验（不会自动替换正在运行的程序）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	uy += 40
+	if u.Button("set.updchecknow", "立即检查更新", ui.R(ux, uy, 120, 32), BtnPrimary) {
+		go a.checkUpdateQuiet()
+		a.toast("已在后台检查更新，结果会出现在通知里", false)
+	}
+	if u.Button("set.updapply", "安装已下载更新", ui.R(ux+130, uy, 140, 32), BtnGhost) {
+		a.cmdUpdateApply("")
+	}
+	c.TextFace(ux+284, uy+8, "安装会先暂存，重启后替换；失败自动回滚", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 }
 
 func (a *App) settingsBudgetTab(p *settingsPane) {
@@ -630,56 +652,17 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	c.TextFace(ix+332, iy+24, "窗口 0 = 128k 兜底；超时 0 = 1200 秒", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 64
 
-	c.TextFace(ix, iy+4, "上下文窗口预设", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	px := ix + 120
-	curWin := a.cfg.ContextWindow
-	if s := strings.TrimSpace(a.ui.Field("set.ctxwin", "").String()); s != "" {
-		if n, err := strconv.Atoi(s); err == nil {
-			curWin = n
-		}
-	}
-	for _, opt := range []struct {
-		label string
-		val   int
-	}{
-		{"auto", 0}, {"8k", 8000}, {"32k", 32000}, {"128k", 128000},
-		{"200k", 200000}, {"300k", 300000}, {"600k", 600000}, {"960k", 960000},
-	} {
-		kind := BtnGhost
-		if curWin == opt.val {
-			kind = BtnPrimary
-		}
-		if u.Button("set.ctx."+opt.label, opt.label, ui.R(px, iy, 54, 28), kind) {
-			a.ui.SetField("set.ctxwin", strconv.Itoa(opt.val))
-			if opt.val >= 300000 && runtime.GOARCH == "386" {
-				a.toast("32 位进程会保留约 60k token 的压缩预算上限，超大窗口不会按满窗口分配内存", true)
-			}
-			a.Redraw()
-		}
-		px += 58
-	}
-	c.TextFace(px+6, iy+5, "大窗口选 300k/600k/960k；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	iy += 24
-	if cap := core.SuggestModelCapabilities(a.cfg.Provider().BaseURL, a.convModel()); cap.ContextWindow > 0 {
-		note := fmt.Sprintf("模型推测窗口：%dk（%s，仅供参考）", cap.ContextWindow/1000, cap.Source)
-		c.TextFace(ix, iy, ellipsis(c, note, ui.FsXs, 400, iw-90), ui.FsXs, 400, th.TextMute, ui.FaceUI)
-		if curWin != cap.ContextWindow {
-			if u.Button("set.ctx.suggest", "采用建议", ui.R(ix+iw-76, iy-4, 76, 24), BtnGhost) {
-				a.ui.SetField("set.ctxwin", strconv.Itoa(cap.ContextWindow))
-				a.Redraw()
-			}
-		}
-	}
-	iy += 20
+	a.settingsContextPresets(p)
 
 	c.TextFace(ix, iy, "自定义单价（美元 / 百万 token）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	c.TextFace(ix+c.MeasureFace("自定义单价（美元 / 百万 token）", ui.FsXs, 500, ui.FaceUI)+14, iy,
 		"不内置价目表；填 0 用保守默认价估算", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 18
-	c.TextFace(ix, iy+9, "输入", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	u.TextField("set.pricein", ui.R(ix+40, iy, 90, 32), "", "0")
-	c.TextFace(ix+144, iy+9, "输出", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	u.TextField("set.priceout", ui.R(ix+184, iy, 90, 32), "", "0")
+	c.TextFace(ix, iy, "输入", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	c.TextFace(ix+126, iy, "输出", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	iy += 18
+	u.TextField("set.pricein", ui.R(ix, iy, 110, 32), "", "0")
+	u.TextField("set.priceout", ui.R(ix+126, iy, 120, 32), "", "0")
 	iy += 50
 
 	lowLabel := "低内存模式：关"
@@ -699,7 +682,7 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 		}
 	}
 	c.TextFace(ix+160, iy+4, "省内存：@引用 48KB · 工具输出 96KB · 索引 1200 文件 · 图片 1024px/2 张", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	if u.Button("set.diag", "自检与诊断 >", ui.R(ix+iw-132, iy, 132, 32), BtnGhost) {
+	if u.Button("set.diag", "打开自检与诊断", ui.R(ix+iw-152, iy, 144, 32), BtnGhost) {
 		a.page = PageDiag
 		if len(a.diag.results) == 0 {
 			a.runChecksAsync()
@@ -707,157 +690,70 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	}
 }
 
-func (a *App) settingsAdvancedTab(p *settingsPane) {
+// settingsToolsTab 收纳过去堆在左侧 rail 上的二级页面。
+// v1.39 UI 重做后，左侧只留「对话 / 全部会话 / 设置与工具」，
+// 这些低频但重要的页面全部以「图标 + 中文名 + 一句说明」的形式出现在这里，
+// 不用再猜一个 32px 图标到底是什么意思。
+func (a *App) settingsToolsTab(p *settingsPane) {
 	c, u := p.c, p.u
 	th := a.th
-	iw := p.cw - 18 - 44
-
-	// 注入与上下文：全局指令、工具定义数量。长指令仍推荐 /instructions，
-	// 这里给一个不打开配置文件也能改的入口。
-	rCtx := p.card("注入与上下文", 190)
-	ixc := rCtx.X + 22
-	iyc := rCtx.Y + 48
-	c.TextFace(ixc, iyc, "用户全局指令（单行；长内容用 /instructions）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	u.TextField("set.sysprompt", ui.R(ixc, iyc+18, iw, 32), "", "例如：回答用中文，先给结论，不要寒暄")
-	c.TextFace(ixc, iyc+58, "工具定义 profile", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	profile := strings.TrimSpace(a.ui.Field("set.toolprofile", "").String())
-	if profile == "" {
-		profile = a.cfg.ToolProfile
+	type tool struct {
+		id, glyph, label, desc string
+		page                   Page
 	}
-	if profile == "" {
-		profile = "auto"
+	tools := []tool{
+		{"tool.diag", "ico:check", "自检与诊断", "配置、工具链、网络连通性", PageDiag},
+		{"tool.auto", "ico:clock", "定时任务", "让助手按计划自动执行", PageAuto},
+		{"tool.ext", "ico:grid", "技能与扩展", "技能、MCP 连接器与工具", PageExt},
+		{"tool.usage", "ico:chart", "用量统计", "token、调用次数与耗时", PageUsage},
+		{"tool.workspace", "ico:panel", "工作区", "项目文件与索引状态（侧栏也可进入）", PageWorkspace},
+		{"tool.costs", "ico:coin", "费用", "按模型与会话查看花费", PageCosts},
+		{"tool.notices", "ico:bell", "通知", "更新与系统提醒", PageNotices},
 	}
-	if u.Button("set.toolprofile", "当前："+profile+"（点击切换）", ui.R(ixc, iyc+78, 220, 30), BtnGhost) {
-		next := "auto"
-		switch strings.ToLower(profile) {
-		case "auto":
-			next = "core"
-		case "core":
-			next = "full"
+	cols := 2
+	if p.cw >= 760 {
+		cols = 3
+	}
+	rows := (len(tools) + cols - 1) / cols
+	cardH := int32(70 + rows*80)
+	r := p.card("工具与面板", cardH)
+	ix := r.X + cardPad
+	iy := r.Y + CardBodyY
+	gap := int32(12)
+	cw := (r.W - cardPad*2 - gap*int32(cols-1)) / int32(cols)
+	for i, t := range tools {
+		col, row := int32(i%cols), int32(i/cols)
+		cell := ui.R(ix+col*(cw+gap), iy+row*80, cw, 70)
+		hover := u.Hit(t.id, cell)
+		bg := th.Surface
+		if hover {
+			bg = ui.Blend(th.Surface, th.AccentSoft, 0.35)
 		}
-		a.ui.SetField("set.toolprofile", next)
-		a.Redraw()
-	}
-	c.TextFace(ixc+232, iyc+80, "auto 在窗口 <64k 或 MCP 工具很多时用 core；full 保留全部工具。",
-		ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	iyc += 122
-	c.TextFace(ixc, iyc, fmt.Sprintf("已禁用技能：%d 个（用 /skills off|on 管理）", len(a.cfg.DisabledSkills)),
-		ui.FsXs, 400, th.TextMute, ui.FaceUI)
-
-	hks := a.cfg.Hooks
-	hooksH := int32(150) + int32(len(hks))*34
-	if len(hks) == 0 {
-		hooksH = 190
-	}
-	r := p.card("工具钩子（hooks）", hooksH)
-	ix := r.X + 22
-	iy := r.Y + 48
-	if len(hks) == 0 {
-		c.TextFace(ix, iy, "还没有钩子。钩子能在工具执行前后自动跑本地命令，例如改完文件自动 gofmt。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-		iy += 26
-	}
-	for i := range hks {
-		h := hks[i]
-		row := ui.R(ix, iy, iw, 30)
-		c.Round(row, 6, ui.Blend(th.Surface, th.Bg, 0.55))
-		c.TextFace(row.X+10, row.Y+7, h.Event+" · "+h.Match, ui.FsXs, 700, th.Text, ui.FaceMono)
-		cm := h.Command
-		if len([]rune(cm)) > 46 {
-			cm = string([]rune(cm)[:45]) + "…"
+		c.Round(cell, 10, bg)
+		c.RoundStroke(cell, 10, ui.Blend(th.BorderSoft, th.Accent, 0.12))
+		ib := ui.R(cell.X+12, cell.Y+19, 32, 32)
+		c.Round(ib, 8, ui.Blend(th.Card, th.AccentSoft, 0.55))
+		if ik, ok := iconKind(t.glyph); ok {
+			drawIcon(c, ik, ui.R(ib.X+8, ib.Y+8, 16, 16), th.Accent)
 		}
-		c.TextFace(row.X+210, row.Y+7, cm, ui.FsXs, 400, th.TextDim, ui.FaceMono)
-		if u.Button("hook.del:"+strconv.Itoa(i), "删除", ui.R(row.Right()-58, row.Y+3, 52, 24), BtnSubtle) {
-			a.cfg.Hooks = append(a.cfg.Hooks[:i], a.cfg.Hooks[i+1:]...)
-			if err := a.cfg.Save(); err != nil {
-				a.toast("保存失败："+err.Error(), true)
-			} else {
-				a.toast("已删除钩子", false)
+		c.TextFace(cell.X+54, cell.Y+16, t.label, ui.FsSm, 700, th.Text, ui.FaceUI)
+		c.TextFace(cell.X+54, cell.Y+39, t.desc, ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		if u.Clicked(t.id) {
+			a.page = t.page
+			if t.page == PageDiag && len(a.diag.results) == 0 {
+				a.runChecksAsync()
 			}
-			a.Redraw()
-		}
-		iy += 34
-	}
-	c.TextFace(ix, iy, "新增：事件 / 工具匹配 / 命令", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	iy += 18
-	u.TextField("hook.event", ui.R(ix, iy, 118, 32), "", "post_tool")
-	u.TextField("hook.match", ui.R(ix+126, iy, 152, 32), "", "write_file,edit_file")
-	u.TextField("hook.cmd", ui.R(ix+286, iy, iw-286-84, 32), "", "gofmt -w .")
-	if u.Button("hook.add", "添加", ui.R(ix+iw-76, iy, 76, 32), BtnGhost) {
-		a.addHook()
-	}
-	iy += 40
-	c.TextFace(ix, iy, "事件限 pre_tool / post_tool / turn_end；pre_tool 以非零退出码结束会阻止本次调用，超时默认 30 秒。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-
-	// 生成参数：不常用，但不能因为“设置页变小”就把能力删掉。
-	rGen := p.card("生成参数", 120)
-	ixn := rGen.X + 22
-	iyn := rGen.Y + 50
-	c.TextFace(ixn, iyn, "温度", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	u.TextField("set.temp", ui.R(ixn, iyn+18, 80, 32), "", "0.3")
-	c.TextFace(ixn+100, iyn, "最大输出 token", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	u.TextField("set.maxtok", ui.R(ixn+100, iyn+18, 100, 32), "", "8192")
-	c.TextFace(ixn+218, iyn+4, "温度 0 更稳定，写代码建议 0.2~0.4；最大输出按端点上限填。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-
-	gitCardH := int32(160)
-	if iw < 600 {
-		gitCardH = 222
-	}
-	rGit := p.card("Git 身份（提交作者）", gitCardH)
-	ixg := rGit.X + 22
-	yyg := rGit.Y + 50
-	git := a.uiData()
-	gName, gEmail, gTemp := git.gitName, git.gitEmail, git.gitTemp
-	if git.gitAt.IsZero() {
-		c.TextFace(ixg, yyg, "正在读取 Git 身份…", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	} else {
-		if a.ui.Field("set.gitname", "").String() == "" && gName != "" {
-			a.ui.SetField("set.gitname", gName)
-			a.ui.SetField("set.gitmail", gEmail)
-		}
-		note := "当前：" + gName + " <" + gEmail + ">"
-		if gTemp {
-			note += "（临时身份，提交历史里会显示成这个名字）"
-		}
-		c.TextFace(ixg, yyg, ellipsis(c, note, ui.FsXs, 400, iw), ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	}
-	yyg += 22
-	if iw >= 600 {
-		c.TextFace(ixg, yyg, "名字", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-		u.TextField("set.gitname", ui.R(ixg, yyg+18, 180, 32), "", "你的名字")
-		c.TextFace(ixg+196, yyg, "邮箱", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-		u.TextField("set.gitmail", ui.R(ixg+196, yyg+18, 220, 32), "", "you@example.com")
-		if u.Button("set.gitsave", "写入 git 全局配置", ui.R(ixg+432, yyg+18, 160, 32), BtnGhost) {
-			name := strings.TrimSpace(u.Field("set.gitname", "").String())
-			mail := strings.TrimSpace(u.Field("set.gitmail", "").String())
-			if err := core.SetGitIdentity(name, mail); err != nil {
-				a.toast(err.Error(), true)
-			} else {
-				a.toast("已写入 git 全局身份："+name+" <"+mail+">", false)
+			if t.page == PageWorkspace {
+				a.invalidateWorkspace()
 			}
-			a.Redraw()
-		}
-	} else {
-		c.TextFace(ixg, yyg, "名字", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-		u.TextField("set.gitname", ui.R(ixg, yyg+18, iw, 32), "", "你的名字")
-		yyg += 58
-		c.TextFace(ixg, yyg, "邮箱", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-		u.TextField("set.gitmail", ui.R(ixg, yyg+18, iw, 32), "", "you@example.com")
-		if u.Button("set.gitsave", "写入 git 全局配置", ui.R(ixg, yyg+58, 160, 32), BtnGhost) {
-			name := strings.TrimSpace(u.Field("set.gitname", "").String())
-			mail := strings.TrimSpace(u.Field("set.gitmail", "").String())
-			if err := core.SetGitIdentity(name, mail); err != nil {
-				a.toast(err.Error(), true)
-			} else {
-				a.toast("已写入 git 全局身份："+name+" <"+mail+">", false)
+			if t.page == PageSessions {
+				a.sessDirty = true
 			}
+			a.forceFull = true
 			a.Redraw()
 		}
 	}
-
-	rAbout := p.card("关于", 120)
-	ixa := rAbout.X + 22
-	iya := rAbout.Y + 48
-	c.TextFace(ixa, iya, "WIN7 Harness · Win7 SP1 原生自绘 UI · Go 1.20.14 · 单文件 EXE", ui.FsXs, 500, th.TextDim, ui.FaceUI)
-	c.TextFace(ixa, iya+22, "只兼容 OpenAI Chat Completions 协议；模型名从端点动态获取，不随应用内置。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	c.TextFace(ixa, iya+44, "OpenCode Go / Go Plus 使用 "+core.OpenCodeGoBaseURL+"，模型 ID 粘贴 opencode-go/xxx 也会自动去掉前缀。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(ix, iy+int32(rows)*80+6, "提示：设置里的更改需要点右上角「保存设置」才会写入配置。", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	// Git 身份与关于信息也归到「工具与关于」，不再藏在「高级」里。
+	a.settingsGitAbout(p)
 }

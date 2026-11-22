@@ -131,7 +131,10 @@ func (a *App) moveFocus(shift bool) {
 	order := []string{"input"}
 	switch a.page {
 	case PageOnboard:
-		order = []string{"ob.base", "ob.key", "ob.model", "ob.dir", "ob.start"}
+		order = nil
+		if a.onbStep == 1 {
+			order = []string{"ob.base", "ob.key", "ob.model", "ob.dir", "ob.back", "ob.start"}
+		}
 	case PageSettings:
 		switch a.settingsTab {
 		case 0:

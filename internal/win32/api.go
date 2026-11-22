@@ -658,6 +658,13 @@ func LoadIconFile(path string, w, h int32) HICON {
 	return HICON(r)
 }
 
+// LoadDefaultIcon 取系统默认应用图标（IDI_APPLICATION）。
+// 托盘必须用有效 HICON：传 0 给 Shell_NotifyIconW 在部分 Win7 上会静默失败。
+func LoadDefaultIcon() HICON {
+	r, _, _ := pcall(pLoadImageW, 0, uintptr(32512), IMAGE_ICON, 16, 16, 0)
+	return HICON(r)
+}
+
 // SetWindowIcon 把图标挂到窗口（小图标=标题栏，大图标=任务栏/Alt-Tab）。
 func SetWindowIcon(h HWND, small, big HICON) {
 	if small != 0 {

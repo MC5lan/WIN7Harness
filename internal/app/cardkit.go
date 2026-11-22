@@ -31,3 +31,21 @@ func (a *App) cardFrame(c *ui.Canvas, r ui.Rect, title string) {
 		c.TextFace(r.X+cardPad, r.Y+cardTitleY, title, ui.FsMd, 700, th.Text, ui.FaceUI)
 	}
 }
+
+// paintPageHeader 统一所有二级页面的顶栏：品牌标识 + 页面名 + 一句说明 +
+// 明确的「返回对话」按钮。过去每个页面各写一遍，标题位置、按钮宽度都不一致，
+// 用户切页时会觉得“每页都是另一套软件”。v1.40.1 收敛成这一处。
+func (a *App) paintPageHeader(u *UI, backID, title, subtitle string) bool {
+	c := u.c
+	th := a.th
+	W := a.winW
+	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
+	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
+	// 侧栏已经有品牌标识，页头不再重复画 logo（用户明确要求删掉这个图标）。
+	c.TextFace(a.railW+24, 14, title, ui.FsLg, 700, th.Text, ui.FaceUI)
+	if subtitle != "" {
+		x := a.railW + 24 + c.MeasureFace(title, ui.FsLg, 700, ui.FaceUI) + 14
+		c.TextFace(x, 20, subtitle, ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	}
+	return u.Button(backID, "返回对话", ui.R(W-140, 14, 116, 30), BtnGhost)
+}

@@ -40,11 +40,7 @@ func (a *App) paintExt(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	// 左侧栏：全屏页之间也能直接互跳，不必先退回对话。
 	a.paintRail(u, H)
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "扩展", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("ext.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	if a.paintPageHeader(u, "ext.back", "技能与扩展", "技能、MCP 连接器与工具") {
 		a.page = PageChat
 	}
 

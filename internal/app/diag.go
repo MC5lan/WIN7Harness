@@ -192,12 +192,8 @@ func (a *App) paintDiag(c *ui.Canvas) {
 	c.FillRect(ui.R(0, 0, W, H), th.Bg)
 	// 与其它 kit 页一致：左侧 rail 是全局导航，诊断页也不能少。
 	a.paintRail(u, H)
-	// 顶栏
-	c.FillRect(ui.R(a.railW, 0, W-a.railW, 56), ui.Blend(th.Bg, th.Surface, 0.6))
-	c.HLine(a.railW, 55, W-a.railW, th.BorderSoft)
-	DrawLogo(c, a.railW+24, 16, 24, th.Accent, th.Bg)
-	c.TextFace(a.railW+56, 18, "自检与诊断", ui.FsLg, 700, th.Text, ui.FaceUI)
-	if u.Button("diag.back", "← 返回对话", ui.R(W-140, 14, 116, 30), BtnGhost) {
+	// 顶栏：统一页头（标题 + 一句用途说明 + 返回对话）
+	if a.paintPageHeader(u, "diag.back", "自检与诊断", "检查配置、工具链与运行环境") {
 		a.page = PageChat
 	}
 

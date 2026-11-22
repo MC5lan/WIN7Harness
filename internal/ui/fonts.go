@@ -32,6 +32,9 @@ func InitFonts() {
 	if !fontAvailable("Segoe UI Symbol") {
 		FaceEmoji = FaceUI
 	}
+	if !fontAvailable("Segoe UI Black") {
+		FaceDisplay, WeightDisplay = FaceUI, 700
+	}
 }
 
 // fontAvailable 通过创建字体并读回实际字体名判断。

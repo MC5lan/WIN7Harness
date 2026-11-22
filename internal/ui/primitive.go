@@ -252,6 +252,10 @@ func textTop(c *Canvas, r Rect, size int32) int32 {
 	return r.CY() - lh/2
 }
 
+// TextTop 是 textTop 的导出版本，给自绘业务控件（按钮、导航项等）使用。
+// 过去这些控件统一写 r.CY()-8，在中文字体（行高大于字号）下会明显偏上。
+func TextTop(c *Canvas, r Rect, size int32) int32 { return textTop(c, r, size) }
+
 // clipText 按可用宽度截断，尾部加省略号。
 // 度量与绘制都走 GDI，避免 canvas 自算宽度与 GDI 差 1-2px 造成抖动。
 func clipText(c *Canvas, s string, size, weight int32, maxW int32, face string) string {

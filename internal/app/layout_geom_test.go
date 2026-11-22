@@ -102,19 +102,21 @@ func TestBothPanelsPreferSideDrawer(t *testing.T) {
 	}
 }
 
-// 断点：DESIGN 要求 ≥1200 可以并排；这里用默认宽度验证边界行为。
+// 断点：DESIGN 要求窄屏降级为抽屉、宽屏可以并排。
+// v1.39 左侧导航从 56 扩到 176（带文字），并排所需的窗口宽度随之提高，
+// 这里用 1360 验证新的边界行为。
 func TestBreakpoint1200(t *testing.T) {
 	g := computePanelGeom(panelInput{
-		WinW: 1200, WinH: 800,
+		WinW: 1360, WinH: 800,
 		ShowSide: true, ShowInsp: true,
 		SideUser: 264, InspUser: 320,
 		SideA: 1, InspA: 1,
 	})
 	if g.SideDrawer {
-		t.Errorf("1200 宽下侧栏应可并排（rail+侧栏+检查器+主区 = %d）", railPanelW+264+320+520)
+		t.Errorf("1360 宽下侧栏应可并排（rail+侧栏+检查器+主区 = %d）", railPanelW+264+320+520)
 	}
 	if g.ChatW < 520 {
-		t.Errorf("1200 宽下主区应至少 520，实际 %d", g.ChatW)
+		t.Errorf("1360 宽下主区应至少 520，实际 %d", g.ChatW)
 	}
 }
 

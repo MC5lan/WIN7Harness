@@ -53,6 +53,8 @@ func (a *App) initForms() {
 	a.ui.SetField("set.priceout", fmt.Sprintf("%g", a.cfg.PriceOut))
 	a.ui.SetField("set.sysprompt", a.cfg.SystemPrompt)
 	a.ui.SetField("set.toolprofile", a.cfg.ToolProfile)
+	a.ui.SetField("set.updrepo", a.cfg.UpdateRepo)
+	a.ui.SetField("set.url", a.cfg.UpdateURL)
 	a.presetIdx = a.cfg.ActiveProvider
 	a.settingsMarkSaved()
 }
@@ -75,66 +77,121 @@ func (a *App) applyPreset(i int) {
 
 /* ---------------- 引导页 ---------------- */
 
+// onbGo 切换引导页步骤。进入第 2 步时焦点交给接口地址；回到第 1 步时清空焦点，
+// 免得看不见的表单框还在接收键入。
+func (a *App) onbGo(step int) {
+	a.onbStep = step
+	if a.ui != nil {
+		if step == 1 {
+			a.ui.SetFocus("ob.base")
+		} else {
+			a.ui.SetFocus("")
+		}
+	}
+	a.Redraw()
+}
+
 func (a *App) paintOnboard(c *ui.Canvas) {
 	th := a.th
 	W, H := a.winW, a.winH
 
-	// 背景渐变：左侧品牌区带一层极淡的强调色，避免整页发白。
+	// 背景渐变：顶部带一层极淡的强调色，避免整页发白。
 	c.Gradient(ui.R(0, 0, W, H), ui.Blend(th.Bg, th.Accent, 0.12), th.Bg, true)
-
-	leftW := W / 2
-	if leftW > 640 {
-		leftW = 640
+	if a.onbStep == 0 {
+		a.paintOnboardWelcome(c)
+		return
 	}
 
-	a.paintOnboardBrand(c, ui.R(48, 48, leftW-96, H-96))
-
-	// 右侧配置卡片
-	cw := int32(520)
-	if W-leftW < 560 {
-		cw = W - leftW - 48
+	// 第 2 步：居中的连接配置卡片。
+	cw := int32(560)
+	if W-96 < cw {
+		cw = W - 96
 	}
-	card := ui.R(leftW+24, 48, cw, H-96)
-	if card.Bottom() > H-24 {
-		card.H = H - 96
+	ch := H - 64
+	if ch > 600 {
+		ch = 600
 	}
-	c.Round(card, 8, th.Card)
-	// 外圈浅描边 + 内圈实线：给白卡片一点浮起感，不靠阴影滤镜。
-	c.RoundStroke(card.Inset(-2), 10, th.BorderSoft)
-	c.RoundStroke(card, 8, th.Border)
+	card := ui.R((W-cw)/2, (H-ch)/2, cw, ch)
+	c.Round(card, 12, th.Card)
+	// 外圈浅描边 + 内圈实线：给卡片一点浮起感，不靠阴影滤镜。
+	c.RoundStroke(card.Inset(-2), 14, th.BorderSoft)
+	c.RoundStroke(card, 12, th.Border)
 	a.paintOnboardForm(c, card)
 }
 
-// paintOnboardBrand 绘制首次启动页左侧品牌与特性列表。
-func (a *App) paintOnboardBrand(c *ui.Canvas, cb ui.Rect) {
+// paintOnboardWelcome 绘制第 1 步：居中的品牌标识（图标 + 艺术字名称）、一句话定位与「下一步」。
+func (a *App) paintOnboardWelcome(c *ui.Canvas) {
 	th := a.th
-	DrawLogo(c, cb.X, cb.Y+8, 44, th.Accent, th.Bg)
-	c.TextFace(cb.X+58, cb.Y+8, "WIN7 Harness", ui.FsH1, 700, th.Text, ui.FaceUI)
-	c.TextFace(cb.X+58, cb.Y+44, "零依赖的本机编程智能体", ui.FsBase, 400, th.TextDim, ui.FaceUI)
+	u := a.ui
+	W, H := a.winW, a.winH
+	cx := W / 2
 
-	feats := [][2]string{
-		{"完全离线原生渲染", "自绘 UI 引擎，不依赖 Edge / WebView2 / 任何运行时，Win7 SP1 直接跑"},
-		{"只认 OpenAI 兼容协议", "填一个 Base URL、Key 和模型 ID 即可；不绑定厂商，也不内置任何模型名"},
-		{"真·本机操作能力", "读写文件、搜索代码、执行编译命令，进程 Job Object 管控，随时可中断"},
-		{"为老机器优化", "单文件 EXE，386 / amd64 双版本，内存占用低，32 位系统同样可用"},
+	const iconSz, titleSz, chipH = int32(104), int32(42), int32(28)
+	const block = iconSz + 14 + titleSz + 16 + 22 + 26 + chipH + 40 + 44
+	top := (H-block)/2 - 24
+
+	// 图标底色取渐变在图标中心处的颜色，让透明圆角与背景无缝衔接。
+	bgAt := ui.Blend(ui.Blend(th.Bg, th.Accent, 0.12), th.Bg, float32(top+iconSz/2)/float32(H))
+	paintBrandMark(c, th, ui.R(cx-iconSz/2, top, iconSz, iconSz), bgAt)
+
+	y := top + iconSz + 14
+	paintBrandTitle(c, th, cx, y, "WIN7 Harness", titleSz)
+
+	y += titleSz + 16
+	tag := "零依赖的本机编程智能体"
+	c.TextFace(cx-c.MeasureFace(tag, ui.FsLg, 400, ui.FaceUI)/2, y, tag, ui.FsLg, 400, th.TextDim, ui.FaceUI)
+
+	y += 22 + 26
+	chips := []string{"完全离线原生渲染", "只认 OpenAI 兼容协议", "为老机器优化"}
+	widths := make([]int32, len(chips))
+	var total int32
+	for i, s := range chips {
+		widths[i] = c.MeasureFace(s, ui.FsSm, 500, ui.FaceUI) + 28
+		total += widths[i] + 10
 	}
-	y := cb.Y + 110
-	for i, f := range feats {
-		if y+64 > cb.Bottom() {
-			break
-		}
-		r := ui.R(cb.X, y, cb.W, 58)
-		c.Round(r, 8, ui.Blend(th.Surface, th.Accent, 0.05))
-		c.RoundStroke(r, 8, th.BorderSoft)
-		// 序号徽标
-		c.Round(ui.R(r.X+14, r.Y+16, 26, 26), 8, ui.Blend(th.Accent, th.Bg, 0.75))
-		c.TextFace(r.X+22, r.Y+20, fmt.Sprintf("%d", i+1), ui.FsSm, 700, th.Accent, ui.FaceUI)
-		c.TextFace(r.X+52, r.Y+10, f[0], ui.FsBase, 700, th.Text, ui.FaceUI)
-		// 描述是「内容说明」而不是占位符：用 TextDim（次级文字），
-		// 深色底上 TextMute 的对比度不足，小字会糊成一片。
-		c.TextFace(r.X+52, r.Y+32, ellipsis(c, f[1], ui.FsXs, 400, r.W-70), ui.FsXs, 400, th.TextDim, ui.FaceUI)
-		y += 68
+	x := cx - (total-10)/2
+	for i, s := range chips {
+		r := ui.R(x, y, widths[i], chipH)
+		c.Round(r, chipH/2, th.Card)
+		c.RoundStroke(r, chipH/2, th.BorderSoft)
+		c.TextFace(r.X+14, ui.TextTop(c, r, ui.FsSm), s, ui.FsSm, 500, th.TextDim, ui.FaceUI)
+		x += widths[i] + 10
 	}
+
+	y += chipH + 40
+	if u.Button("ob.next", "下一步", ui.R(cx-100, y, 200, 44), BtnPrimary) {
+		a.onbGo(1)
+	}
+
+	// 步骤指示：当前页是实心胶囊，下一页是小圆点。
+	dy := H - 56
+	c.Round(ui.R(cx-19, dy, 22, 8), 4, th.Accent)
+	c.Round(ui.R(cx+11, dy, 8, 8), 4, th.Border)
+}
+
+// paintBrandTitle 绘制品牌艺术字：逐字从强调色渐变到正文色，底下压一层强调色投影。
+func paintBrandTitle(c *ui.Canvas, th *ui.Theme, cx, y int32, s string, size int32) {
+	face, weight := ui.FaceDisplay, ui.WeightDisplay
+	w := c.MeasureFace(s, size, weight, face)
+	x0 := cx - w/2
+	c.TextFace(x0, y+4, s, size, weight, ui.Blend(th.Bg, th.Accent, 0.35), face)
+	x := x0
+	for _, r := range s {
+		g := string(r)
+		adv := c.MeasureFace(g, size, weight, face)
+		t := float32(x+adv/2-x0) / float32(w)
+		c.TextFace(x, y, g, size, weight, ui.Blend(th.Accent, th.Text, t), face)
+		x += adv
+	}
+}
+
+// paintBrandMark 绘制品牌图标：ico 位图压在 bg 上；取不到时退回矢量标识。
+func paintBrandMark(c *ui.Canvas, th *ui.Theme, r ui.Rect, bg uint32) {
+	if img := ui.AppIcon(c.Px(r.W), bg); img != nil {
+		c.DrawImg(img, r)
+		return
+	}
+	DrawLogo(c, r.X, r.Y, r.W, th.Accent, th.Bg)
 }
 
 // paintOnboardForm 绘制首次启动页右侧连接配置卡片。
@@ -142,13 +199,15 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 	th := a.th
 	x := card.X + 28
 	iw := card.W - 56
-	yy := card.Y + 24
+	yy := card.Y + 26
 
+	paintBrandMark(c, th, ui.R(x, yy-2, 28, 28), th.Card)
+	tx := x + 40
 	title := "连接模型"
-	c.TextFace(x, yy, title, ui.FsLg, 700, th.Text, ui.FaceUI)
-	stepX := x + c.MeasureFace(title, ui.FsLg, 700, ui.FaceUI) + 14
-	c.TextFace(stepX, yy+6, "第 1 步 / 共 1 步", ui.FsXs, 400, th.TextMute, ui.FaceUI)
-	yy += 34
+	c.TextFace(tx, yy, title, ui.FsLg, 700, th.Text, ui.FaceUI)
+	stepX := tx + c.MeasureFace(title, ui.FsLg, 700, ui.FaceUI) + 14
+	c.TextFace(stepX, yy+6, "第 2 步 / 共 2 步", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	yy += 40
 	c.TextFace(x, yy, "选择一个接入方式，或直接填任意 OpenAI 兼容地址。", ui.FsSm, 400, th.TextDim, ui.FaceUI)
 	yy += 26
 	yy = a.paintOnboardPresets(c, x, iw, yy)
@@ -322,16 +381,22 @@ func (a *App) paintOnboardFooter(c *ui.Canvas, card ui.Rect, x, iw, yy int32) {
 		yy += 22
 	}
 
-	// 底部按钮
-	by := card.Bottom() - 56
-	startBtn := ui.R(card.Right()-160, by, 132, 38)
+	// 底部：分隔线 + 返回 / 开始
+	by := card.Bottom() - 64
+	c.HLine(x, by-16, iw, th.BorderSoft)
+	if u.Button("ob.back", "上一步", ui.R(x, by, 96, 38), BtnGhost) {
+		a.onbGo(0)
+	}
+	startBtn := ui.R(x+iw-132, by, 132, 38)
 	if u.Button("ob.start", "开始使用", startBtn, BtnPrimary) {
 		a.queueUI(a.finishOnboard)
 	}
+	note := "配置保存在本机，不会上传"
 	if a.testing {
-		c.TextFace(card.Right()-260, by+10, "测试中…", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		note = "测试中…"
 	}
-	c.TextFace(x, by+10, "配置保存在本机，不会上传", ui.FsXs, 400, th.TextMute, ui.FaceUI)
+	c.TextFace(startBtn.X-16-c.MeasureFace(note, ui.FsXs, 400, ui.FaceUI), ui.TextTop(c, startBtn, ui.FsXs),
+		note, ui.FsXs, 400, th.TextMute, ui.FaceUI)
 
 	// 键盘：Tab 切焦点
 	_ = win32.VK_TAB
@@ -622,6 +687,12 @@ func (a *App) saveSettings() {
 	fmt.Sscanf(mt, "%d", &a.cfg.MaxTokens)
 	a.cfg.ProxyURL = strings.TrimSpace(a.ui.Field("set.proxyurl", "").String())
 	a.cfg.TLSExtraCA = strings.TrimSpace(a.ui.Field("set.tlsca", "").String())
+	if repo := strings.TrimSpace(a.ui.Field("set.updrepo", "").String()); repo != "" {
+		a.cfg.UpdateRepo = repo
+	}
+	if url := strings.TrimSpace(a.ui.Field("set.url", "").String()); url != "" {
+		a.cfg.UpdateURL = url
+	}
 	if a.cfg.ProxyMode == "manual" && a.cfg.ProxyURL == "" {
 		a.toast("已选手动代理，请填写代理地址", true)
 		return

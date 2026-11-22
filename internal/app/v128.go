@@ -72,12 +72,21 @@ func (a *App) trayEnsure() {
 	if a.trayInit || a.w == nil {
 		return
 	}
-	a.trayInit = true
 	if ok := a.w.EnableTray("Win7 Harness"); ok {
+		a.trayInit = true
 		a.trayOn = true
 		a.w.SetTrayClick(func() {
 			a.toast("窗口已从托盘恢复", false)
 		})
+		core.Logf("托盘图标已添加")
+		return
+	}
+	// Explorer 可能还没起来（刚登录、远程桌面切换、资源管理器重启），
+	// Shell_NotifyIconW 会静默失败。每帧重试，超过一定次数再放弃并写日志。
+	a.trayFails++
+	if a.trayFails >= 120 {
+		a.trayInit = true
+		core.Logf("!! 托盘图标添加失败 %d 次，已放弃；可手动重启资源管理器后重试", a.trayFails)
 	}
 }
 
