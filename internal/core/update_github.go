@@ -16,20 +16,6 @@ import (
 // 完整性校验。没有提供校验和时 fail-closed，绝不把来路不明的 exe 标成“更新包”。
 // 签名清单模式（UpdateSource=manifest）仍然保留，给正式发布使用。
 
-// RuntimeArch 返回 386 / amd64，与 Release 资产命名一致。
-func RuntimeArch() string {
-	if Is386() {
-		return "386"
-	}
-	return "amd64"
-}
-
-const (
-	UpdateSourceGitHub   = "github"
-	UpdateSourceManifest = "manifest"
-	DefaultUpdateRepo    = "MC5lan/WIN7Harness"
-)
-
 // GitHubRelease 只取更新需要的字段，忽略 API 的其它大段 JSON。
 type GitHubRelease struct {
 	TagName string `json:"tag_name"`
