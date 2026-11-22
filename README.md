@@ -21,7 +21,7 @@
 > **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
 > 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 >
-> **关于本仓库**：本仓库是 v1.39.8 的快照发布，早期迭代历史未提交到 git；
+> **关于本仓库**：本仓库是 v1.39.9 的快照发布，早期迭代历史未提交到 git；
 > 各版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 `docs/`。
 
 > 上文的“零运行时依赖”指静态链接的单文件 exe。构建期依赖 Go 1.20.14 工具链与
@@ -121,7 +121,7 @@ flowchart LR
 - 源码：在 Releases 页面的 “Source code” 区域下载，或直接 `git clone`
 - [`release/`](release/) 目录不再提交构建产物
 
-解压后双击 `WIN7Harness-v1.39.8-Setup.exe`：
+解压后双击 `WIN7Harness-v1.39.9-Setup.exe`：
 
 1. 选择安装范围：仅当前用户（免管理员）或所有用户（Program Files + UAC）
 2. 选择安装方式：标准安装 / 便携安装（U 盘）
@@ -223,7 +223,7 @@ powershell -ExecutionPolicy Bypass -File scripts\installer_regression.ps1
 dist/
   WIN7Harness-amd64.exe
   WIN7Harness-386.exe
-  Win7Harness-v1.39.8-Setup.exe
+  Win7Harness-v1.39.9-Setup.exe
   README.txt
   version.txt
   ...
@@ -256,7 +256,7 @@ scripts/              安装器回归、UI 回归、生命周期检查
 | [企业网络 / PAC / WPAD / CA](docs/win7-enterprise-network-v1.36.md) | 企业内网与证书配置 |
 | [Canvas 渲染与故障排查](docs/canvas-render.md) | 自绘渲染与常见问题 |
 | [Win32 API 注意事项](docs/win32-api-notes.md) | Win7 上的 API 使用边界 |
-| [更新日志](CHANGELOG.md) | v1.7.0 → v1.39.8 的版本演进 |
+| [更新日志](CHANGELOG.md) | v1.7.0 → v1.39.9 的版本演进 |
 | [贡献指南](CONTRIBUTING.md) | 红线、构建、验证与 PR 规范 |
 | [依赖审计](docs/deps-audit.md) | 直接/间接依赖、许可证与裁剪结论 |
 | [发布流程](docs/release-process.md) | 改版本、打 tag、签名与验证 `/update` |

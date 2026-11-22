@@ -661,8 +661,14 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	c.TextFace(px+6, iy+5, "大窗口选 300k/600k/960k；保存后生效", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 24
 	if cap := core.SuggestModelCapabilities(a.cfg.Provider().BaseURL, a.convModel()); cap.ContextWindow > 0 {
-		note := fmt.Sprintf("模型推测窗口：%dk（%s，仅供参考，不会自动覆盖）", cap.ContextWindow/1000, cap.Source)
-		c.TextFace(ix, iy, ellipsis(c, note, ui.FsXs, 400, iw), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		note := fmt.Sprintf("模型推测窗口：%dk（%s，仅供参考）", cap.ContextWindow/1000, cap.Source)
+		c.TextFace(ix, iy, ellipsis(c, note, ui.FsXs, 400, iw-90), ui.FsXs, 400, th.TextMute, ui.FaceUI)
+		if curWin != cap.ContextWindow {
+			if u.Button("set.ctx.suggest", "采用建议", ui.R(ix+iw-76, iy-4, 76, 24), BtnGhost) {
+				a.ui.SetField("set.ctxwin", strconv.Itoa(cap.ContextWindow))
+				a.Redraw()
+			}
+		}
 	}
 	iy += 20
 

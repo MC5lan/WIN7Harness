@@ -8,6 +8,23 @@ import (
 	"win7harness/internal/core"
 )
 
+func TestSettingsFieldValidation(t *testing.T) {
+	a := &App{ui: NewUI(nil, nil), cfg: core.DefaultConfig()}
+	a.ui.SetField("set.maxtok", "abc")
+	if id, _ := a.validateSettingsFields(); id != "set.maxtok" {
+		t.Fatalf("非法 token 字段未拦截：%q", id)
+	}
+	a.ui.SetField("set.maxtok", "8192")
+	a.ui.SetField("set.ctxwin", "960k")
+	if id, msg := a.validateSettingsFields(); id != "" {
+		t.Fatalf("合法字段被拦截：%s %s", id, msg)
+	}
+	a.ui.SetField("set.ctxwin", "32x")
+	if id, _ := a.validateSettingsFields(); id != "set.ctxwin" {
+		t.Fatalf("非法窗口未拦截：%q", id)
+	}
+}
+
 func TestSettingsDirtyState(t *testing.T) {
 	a := &App{ui: NewUI(nil, nil), cfg: core.DefaultConfig()}
 	a.initForms()

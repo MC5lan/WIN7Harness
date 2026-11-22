@@ -578,6 +578,11 @@ func (a *App) saveSettings() {
 		a.toast("生成中不能保存设置：先停止或等本轮结束", true)
 		return
 	}
+	if field, msg := a.validateSettingsFields(); field != "" {
+		a.toast(msg, true)
+		a.ui.SetFocus(field)
+		return
+	}
 	base := strings.TrimSpace(a.ui.Field("set.base", "").String())
 	key := strings.TrimSpace(a.ui.Field("set.key", "").String())
 	model := strings.TrimSpace(a.ui.Field("set.model", "").String())
@@ -624,7 +629,9 @@ func (a *App) saveSettings() {
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.maxcost", "").String()), "%f", &a.cfg.MaxCost)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.budget", "").String()), "%d", &a.cfg.BudgetTokens)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.rounds", "").String()), "%d", &a.cfg.MaxToolRounds)
-	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.ctxwin", "").String()), "%d", &a.cfg.ContextWindow)
+	if n, ok := parseWindowSize(strings.TrimSpace(a.ui.Field("set.ctxwin", "").String())); ok {
+		a.cfg.ContextWindow = n
+	}
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.subto", "").String()), "%d", &a.cfg.SubAgentTimeoutSec)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.pricein", "").String()), "%f", &a.cfg.PriceIn)
 	fmt.Sscanf(strings.TrimSpace(a.ui.Field("set.priceout", "").String()), "%f", &a.cfg.PriceOut)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -108,6 +109,23 @@ func TestPromptPlanIncludesBuiltinAndActiveSkill(t *testing.T) {
 	}
 	if !strings.Contains(text, "当前已加载技能") {
 		t.Fatal("缺少已加载技能段落")
+	}
+}
+
+func TestLargeContextWindowBudget(t *testing.T) {
+	for _, window := range []int{300000, 600000, 960000} {
+		e := &Engine{ContextWindow: window, MaxTok: 8192}
+		if strconv.IntSize == 64 && e.contextTokenLimit() < window/2-1 {
+			t.Fatalf("窗口 %d 的压缩预算过低：%d", window, e.contextTokenLimit())
+		}
+		if got := e.maxOutputTokens(); got != 8192 {
+			t.Fatalf("大窗口不应压低输出上限：%d", got)
+		}
+	}
+	if strconv.IntSize == 64 {
+		if got := compactTranscriptChars(960000); got < 500000 {
+			t.Fatalf("大窗口压缩转录上限过低：%d", got)
+		}
 	}
 }
 
