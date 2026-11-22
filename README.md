@@ -23,7 +23,7 @@
 > **本项目使用 [Apache License 2.0](LICENSE)。** 允许个人与商业使用、修改、分发和私有部署，
 > 无需单独授权；保留 `LICENSE` / `NOTICE` 与版权声明即可。商业支持见 [COMMERCIAL.md](COMMERCIAL.md)。
 >
-> **关于本仓库**：本仓库是 v2.0.0 的快照发布，早期迭代历史未提交到 git；
+> **关于本仓库**：本仓库是 v2.0.1 的快照发布，早期迭代历史未提交到 git；
 > 各版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 `docs/`。
 
 > 上文的“零运行时依赖”指静态链接的单文件 exe。构建期依赖 Go 1.20.14 工具链与

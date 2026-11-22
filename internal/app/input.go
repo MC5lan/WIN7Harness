@@ -223,7 +223,15 @@ func readableOn(fg, bg uint32, min float64) uint32 {
 	if l1 < l2 {
 		l1, l2 = l2, l1
 	}
-	if (l1+0.05)/(l2+0.05) >= min {
+	ok := (l1+0.05)/(l2+0.05) >= min
+	// 最后一道保险：前景和背景必须落在明暗两侧且拉开距离。
+	// 主题令牌分叉时（浅色卡面配到深色主题的浅字）对比度公式仍可能放行，
+	// 但屏幕上是"白底白字"，整段输入看起来像被擦掉。此时强制黑/白。
+	lf, lb := colorLum(fg), colorLum(bg)
+	if ok && ((lf > 0.5) == (lb > 0.5) || math.Abs(lf-lb) < 0.2) {
+		ok = false
+	}
+	if ok {
 		return fg
 	}
 	if colorLum(bg) > 0.5 {

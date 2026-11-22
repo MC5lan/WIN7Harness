@@ -13,3 +13,14 @@ func TestReadableOnFallsBackToBlackOrWhite(t *testing.T) {
 		t.Fatalf("对比度足够时应保留原色，实际 %#x", got)
 	}
 }
+
+func TestReadableOnRejectsSameLightnessDivergence(t *testing.T) {
+	// 浅底浅字：对比度公式在某些令牌组合下会误判为可读，但屏幕上是白底白字。
+	if got := readableOn(0x00F5F0EB, 0x00FFFFFF, 4.5); got != 0x000000 {
+		t.Fatalf("浅底浅字应退回黑色，实际 %#x", got)
+	}
+	// 深底深字同理。
+	if got := readableOn(0x00292C2E, 0x001B1D1F, 4.5); got != 0x00FFFFFF {
+		t.Fatalf("深底深字应退回白色，实际 %#x", got)
+	}
+}
