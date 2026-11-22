@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+func TestPreApprovedSkipsDiffConfirm(t *testing.T) {
+	called := false
+	ctx := &Context{
+		PreApproved: true,
+		Confirm:     func(string, string) bool { called = true; return false },
+	}
+	if !confirmDiff(ctx, "demo.txt", "a\nb\n", "a\nB\n", "修改") {
+		t.Fatal("预授权后不应再弹差异确认")
+	}
+	if called {
+		t.Fatal("预授权后仍然调用了确认回调")
+	}
+}
+
 func TestEditFileReturnsUIDiff(t *testing.T) {
 	t.Setenv("WIN7HARNESS_HOME", t.TempDir())
 	dir := t.TempDir()

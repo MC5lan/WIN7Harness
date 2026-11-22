@@ -85,7 +85,9 @@ func runCommand(ctx *Context, args map[string]interface{}) (Result, error) {
 		ctx.Progress("$ " + cmdline)
 	}
 
-	out, code, err := runShell(cmdline, cwd, time.Duration(timeout)*time.Second, nil)
+	// 必须把 ctx 的取消信号传给 runShell：用户点“停止”时要杀整棵进程树，
+	// 否则鼠标/键盘自动化脚本会继续在后台动，直到 timeout 才结束。
+	out, code, err := runShell(cmdline, cwd, time.Duration(timeout)*time.Second, nil, ctxDone(ctx))
 	if err != nil && out == "" {
 		return Result{}, err
 	}

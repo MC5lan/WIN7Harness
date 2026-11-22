@@ -15,7 +15,7 @@ import (
 var errEmptyDir = errors.New("目录路径为空")
 
 // Version 是应用版本号，同时用于配置迁移判断。
-const Version = "1.39.9"
+const Version = "1.40.0"
 
 // PresetVersion 是接入预设的版本号。v3 起不再内置任何模型名：
 // 应用只认识 OpenAI 兼容协议，模型 ID 由用户填写或从端点 /models 动态拉取。

@@ -151,7 +151,7 @@ func safeCmdPath(p string) bool {
 // 走 runShell（Job Object + taskkill /T 杀树 + CREATE_NO_WINDOW），
 // 命令串只可能是内部固定模板，调用方无法注入。
 func runCmdCapture(ctx *Context, cmdStr string, timeout int) (string, int, error) {
-	return runShell(cmdStr, ctx.WorkDir, time.Duration(timeout)*time.Second, nil)
+	return runShell(cmdStr, ctx.WorkDir, time.Duration(timeout)*time.Second, nil, ctxDone(ctx))
 }
 
 func quoteIfSpace(s string) string {

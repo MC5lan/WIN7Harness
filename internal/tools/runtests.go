@@ -89,7 +89,7 @@ func runTests(ctx *Context, args map[string]interface{}) (Result, error) {
 		ctx.Progress("$ " + cmdline)
 	}
 
-	out, code, err := runShell(cmdline, cwd, time.Duration(timeout)*time.Second, nil)
+	out, code, err := runShell(cmdline, cwd, time.Duration(timeout)*time.Second, nil, ctxDone(ctx))
 	if err != nil && out == "" {
 		return Result{}, err
 	}

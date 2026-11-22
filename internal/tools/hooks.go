@@ -79,7 +79,7 @@ func RunHooks(event, tool string, ctx *Context) (block bool, note string) {
 			"HARNESS_EVENT=" + event,
 			"HARNESS_TOOL=" + name,
 			"HARNESS_WORKDIR=" + ctx.WorkDir,
-		})
+		}, ctxDone(ctx))
 		used := time.Since(start).Milliseconds()
 		out = sanitizeHookOutput(out, 4000)
 		b.WriteString(fmt.Sprintf("%s\n退出码: %d，耗时: %dms\n", line, code, used))

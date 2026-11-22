@@ -810,6 +810,12 @@ func runTodoWrite(ctx *Context, args map[string]interface{}) (Result, error) {
 // confirmDiff 按配置决定是否在写盘前弹出统一差异预览（off/large/always）。
 // 返回 true 表示允许继续写入。
 func confirmDiff(ctx *Context, p, oldText, newText, verb string) bool {
+	// 权限策略已经明确放行（auto 或 allow 规则）时，不再为每次编辑弹差异预览；
+	// 用户要逐段审阅时应使用 ask 模式或 /perm 规则。否则“自动执行”仍会
+	// 被每一处修改打断，实际体验就是逐个手动点。
+	if ctx.PreApproved {
+		return true
+	}
 	if ctx.Confirm == nil && ctx.ConfirmDiff == nil {
 		return true
 	}

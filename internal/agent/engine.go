@@ -597,6 +597,11 @@ func (e *Engine) execToolRaw(name, rawArgs string) (out, detail string) {
 		dec := e.Policy.Decide(name, permTarget(name, args, e.WorkDir),
 			!tools.IsReadOnly(name), permRisk(name, args), e.WorkDir)
 		switch dec.Kind {
+		case "allow":
+			// 策略已经批准这次调用，工具内部（如 run_command 的风险分级）
+			// 不要再弹第二次确认。auto 模式此前漏了这一步，导致 build.bat、
+			// powershell 等 RiskCaution 命令仍然逐个弹窗，看起来像“自动执行没用”。
+			preApproved = true
 		case "deny":
 			return "错误：权限策略拒绝执行 " + name + "（" + dec.Reason + "）。需要放行请让用户用 /perm 调整规则。", ""
 		case "ask":
@@ -611,8 +616,11 @@ func (e *Engine) execToolRaw(name, rawArgs string) (out, detail string) {
 	}
 	ctx := &tools.Context{
 		PreApproved: preApproved,
-		Agents:      core.LoadAgentDefsCached(e.WorkDir),
-		WorkDir:     e.WorkDir,
+		// Ctx 必须注入当前引擎循环的取消上下文：run_command/run_tests 等
+		// 工具靠它把“用户点停止”变成杀整棵进程树，而不是等 timeout。
+		Ctx:     e.parentCtx(),
+		Agents:  core.LoadAgentDefsCached(e.WorkDir),
+		WorkDir: e.WorkDir,
 		Confirm: func(title, detail string) bool {
 			if e.Confirm == nil {
 				return false
