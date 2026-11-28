@@ -173,6 +173,63 @@ func GitHubReleaseNotes(rel *GitHubRelease) string {
 	return rel.Name
 }
 
+// githubAssetURL 在 Release 资产里按文件名查找下载地址（不区分大小写）。
+func githubAssetURL(rel *GitHubRelease, name string) string {
+	if rel == nil {
+		return ""
+	}
+	for i := range rel.Assets {
+		if strings.EqualFold(rel.Assets[i].Name, name) {
+			return rel.Assets[i].BrowserDownloadURL
+		}
+	}
+	return ""
+}
+
+// verifyGitHubManifest 在 GitHub 更新模式下额外校验 latest.json 的 Ed25519 签名。
+// 只靠 SHA256SUMS 时，GitHub 账号/Release 权限被攻陷即可同时替换 exe 和校验和；
+// 正式构建（注入了 UpdatePublicKey）必须同时验签，缺失/不匹配一律拒绝。
+func verifyGitHubManifest(rel *GitHubRelease, sums UpdateFile, fetch UpdateFetcher) error {
+	if strings.TrimSpace(UpdatePublicKey) == "" {
+		updateKeyWarnOnce.Do(func() {
+			Logf("update: 未配置 UpdatePublicKey，GitHub 更新仅校验 SHA256SUMS（仅开发构建）")
+		})
+		return nil
+	}
+	url := githubAssetURL(rel, "latest.json")
+	if url == "" {
+		return errors.New("Release 缺少 latest.json，正式构建拒绝只靠 SHA256SUMS 自动更新")
+	}
+	if fetch == nil {
+		fetch = HTTPFetcher
+	}
+	data, err := fetch(url)
+	if err != nil {
+		return fmt.Errorf("读取 latest.json 失败：%w", err)
+	}
+	m, err := ParseUpdateManifest(data)
+	if err != nil {
+		return fmt.Errorf("latest.json 无效：%w", err)
+	}
+	if err := VerifyUpdateManifest(m, UpdatePublicKey); err != nil {
+		return fmt.Errorf("latest.json 验签失败：%w", err)
+	}
+	if normalizeTag(m.Version) != normalizeTag(rel.TagName) {
+		return fmt.Errorf("latest.json 版本 %q 与 Release tag %q 不一致", m.Version, rel.TagName)
+	}
+	mf, ok := m.FileFor(RuntimeArch())
+	if !ok {
+		return fmt.Errorf("latest.json 缺少 %s 架构", RuntimeArch())
+	}
+	if len(mf.SHA256) != 64 {
+		return errors.New("latest.json 的 SHA256 不是 64 位十六进制")
+	}
+	if !strings.EqualFold(mf.SHA256, sums.SHA256) {
+		return errors.New("latest.json 与 SHA256SUMS.txt 的校验和不一致")
+	}
+	return nil
+}
+
 // UpdateCheck 是两种更新源共用的检查结果，界面只认这一种结构。
 type UpdateCheck struct {
 	Version string
@@ -215,6 +272,9 @@ func CheckUpdateAny(current, source, repo, manifestURL string, fetch UpdateFetch
 	}
 	f, err := GitHubUpdateFile(rel, RuntimeArch(), fetch)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := verifyGitHubManifest(rel, f, fetch); err != nil {
 		return nil, false, err
 	}
 	return &UpdateCheck{
