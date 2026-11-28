@@ -485,7 +485,7 @@ func (a *App) settingsPermTab(p *settingsPane) {
 	}
 	iy += 42
 	modeText := map[string]string{
-		"auto": "自动执行：非高危操作直接放行，高危命令仍逐次确认",
+		"auto": "自动执行：仅低风险操作直接放行；删除/复制/解释器等中危命令仍逐次确认",
 		"ask":  "每次确认：写类操作与高危命令都逐次询问",
 		"plan": "只读计划：禁止改文件与执行高危命令",
 	}[permCur]

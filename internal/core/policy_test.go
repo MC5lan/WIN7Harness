@@ -47,6 +47,26 @@ func TestDangerousAlwaysAsks(t *testing.T) {
 	}
 }
 
+// auto 模式只自动放行 Safe；Caution（del/copy/解释器/计划任务）必须确认。
+// 显式 allow 规则仍然可以覆盖，方便用户为自己信任的命令减少打扰。
+func TestAutoCautionAsks(t *testing.T) {
+	p := NewPolicy(PermAuto, nil, nil, nil, nil)
+	if got := p.Decide("run_command", "del notes.txt", true, RiskCaution, ""); got.Kind != "ask" {
+		t.Fatalf("auto 下 del 应 ask，实际 %v", got.Kind)
+	}
+	if got := p.Decide("run_command", "powershell -Command dir", true, RiskCaution, ""); got.Kind != "ask" {
+		t.Fatalf("auto 下 powershell 应 ask，实际 %v", got.Kind)
+	}
+	if got := p.Decide("run_command", "echo hello", true, RiskSafe, ""); !got.Allow() {
+		t.Fatalf("auto 下 Safe 应放行，实际 %v", got.Kind)
+	}
+
+	allowed := NewPolicy(PermAuto, []string{"run_command:del *"}, nil, nil, nil)
+	if got := allowed.Decide("run_command", "del notes.txt", true, RiskCaution, ""); !got.Allow() {
+		t.Fatalf("显式 allow 规则应覆盖 Caution，实际 %v", got.Kind)
+	}
+}
+
 // deny 规则压过 allow。
 func TestDenyBeatsAllow(t *testing.T) {
 	p := NewPolicy(PermAuto, []string{"*:git *"}, []string{"run_command:git push"}, nil, nil)

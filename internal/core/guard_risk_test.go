@@ -26,6 +26,11 @@ func TestCommandRiskSwitchOrder(t *testing.T) {
 		{`C:\Windows\System32\cmd.exe /c rd /q /s x`, RiskDanger},
 		{"cmd /d /c rmdir /q /s x", RiskDanger},
 		{"go test ./... && rd /q /s dist", RiskDanger},
+		// cmd.exe 二次展开：不能按字面判 safe。
+		{"r^d /s /q C:\\proj", RiskCaution},
+		{"for %i in (/s) do @rd %i /q C:\\proj", RiskCaution},
+		{`cmd /v:on /c "set S=/s& rd !S! /q C:\proj"`, RiskCaution},
+		{"reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v x /d C:\\x.exe", RiskCaution},
 		// 不应误伤。
 		{"rd build", RiskSafe},
 		{"rm -r build", RiskSafe},
@@ -53,6 +58,9 @@ func TestCommandRiskDiscardAndSystem(t *testing.T) {
 		{"git clean -d -f", RiskDanger},
 		{"git clean --force", RiskDanger},
 		{"git -C D:\\proj clean -xdf", RiskDanger},
+		{"git --git-dir .git clean -fdx", RiskDanger},
+		{"git --work-tree D:\\proj clean -fdx", RiskDanger},
+		{"git rm -r -f .", RiskDanger},
 		{"git reset --hard HEAD~5", RiskDanger},
 		{"git checkout -- .", RiskDanger},
 		{"git checkout .", RiskDanger},
