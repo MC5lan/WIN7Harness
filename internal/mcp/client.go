@@ -314,7 +314,7 @@ func readMCPLine(r *bufio.Reader) ([]byte, error) {
 
 func (c *Client) callContext(ctx context.Context, method string, params interface{}, out interface{}, timeout time.Duration) error {
 	if c.remote != nil {
-		return c.remote.call(method, params, out, timeout)
+		return c.remote.callContext(ctx, method, params, out, timeout)
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()

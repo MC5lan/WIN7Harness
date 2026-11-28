@@ -95,13 +95,17 @@ func isMCPLocalHost(h string) bool {
 }
 
 func (r *remoteConn) call(method string, params interface{}, out interface{}, timeout time.Duration) error {
+	return r.callContext(context.Background(), method, params, out, timeout)
+}
+
+func (r *remoteConn) callContext(ctx context.Context, method string, params interface{}, out interface{}, timeout time.Duration) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return fmt.Errorf("连接已关闭")
 	}
 	r.seq++
-	return r.roundTrip(method, params, r.seq, out, timeout)
+	return r.roundTripContext(ctx, method, params, r.seq, out, timeout)
 }
 
 // notify 发通知（无 id，不需要响应）。SSE 服务可能仍回 202/204，忽略正文即可。
@@ -120,16 +124,24 @@ func (r *remoteConn) notify(method string, params interface{}) error {
 }
 
 func (r *remoteConn) roundTrip(method string, params interface{}, id int64, out interface{}, timeout time.Duration) error {
+	return r.roundTripContext(context.Background(), method, params, id, out, timeout)
+}
+
+func (r *remoteConn) roundTripContext(ctx context.Context, method string, params interface{}, id int64, out interface{}, timeout time.Duration) error {
 	msg := map[string]interface{}{"jsonrpc": "2.0", "id": id, "method": method}
 	if params != nil {
 		msg["params"] = params
 	}
-	_, err := r.post(msg, id, timeout, out)
+	_, err := r.postContext(ctx, msg, id, timeout, out)
 	return err
 }
 
 // post 发一条 JSON-RPC 消息；响应为 SSE 时逐帧找 id 匹配的那条。
 func (r *remoteConn) post(msg map[string]interface{}, wantID int64, timeout time.Duration, out interface{}) (json.RawMessage, error) {
+	return r.postContext(context.Background(), msg, wantID, timeout, out)
+}
+
+func (r *remoteConn) postContext(base context.Context, msg map[string]interface{}, wantID int64, timeout time.Duration, out interface{}) (json.RawMessage, error) {
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return nil, err
@@ -137,7 +149,10 @@ func (r *remoteConn) post(msg map[string]interface{}, wantID int64, timeout time
 	if timeout <= 0 {
 		timeout = 60 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(base, timeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", r.url, bytes.NewReader(body))
 	if err != nil {
