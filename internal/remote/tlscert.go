@@ -37,7 +37,7 @@ func LoadOrCreateSelfSignedCert(hosts []string, days int) (certPEM, keyPEM []byt
 	if err != nil {
 		return nil, nil, err
 	}
-	if werr := writeFileAtomic0600(p, append(append(append(certPEM, '\n'), keyPEM...))); werr != nil {
+	if werr := writeFileAtomic0600(p, append(append(certPEM, '\n'), keyPEM...)); werr != nil {
 		// 落盘失败不致命：本次用内存里的证书跑，下次再试（但日志要能看出来）
 		core.Logf("remote: 自签证书落盘失败（%s）：%v", p, werr)
 	}
