@@ -31,6 +31,17 @@ func (a *App) Timer() bool {
 		a.lastCfgPublish = now
 		core.PublishConfig(a.cfg)
 	}
+	if !a.healthMarked {
+		if a.bootAt.IsZero() {
+			a.bootAt = now
+		}
+		if now.Sub(a.bootAt) >= 3*time.Second {
+			a.healthMarked = true
+			if err := core.MarkUpdateHealthy(); err != nil {
+				core.Logf("update: 写健康标记失败：%v", err)
+			}
+		}
+	}
 
 	// 按需重绘：交互/流式/浮层保持 33fps；完全静止时降到 4fps。
 	// 输入事件本身会 Invalidate，不会牺牲按键的即时响应。

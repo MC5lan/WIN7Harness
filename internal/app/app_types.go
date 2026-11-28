@@ -94,7 +94,11 @@ type App struct {
 	// lastCfgPublish 控制配置快照的发布频率：UI 线程每秒把 a.cfg 的
 	// 深拷贝发布到 core.current，工具 goroutine 只读快照，不再和设置页并发读写。
 	lastCfgPublish time.Time
-	eng            *agent.Engine
+	// bootAt/healthMarked 用于更新后的启动健康标记：主循环稳定跑 3 秒后
+	// 写 update-healthy.txt，替换脚本据此判断新版本是否真的起来了。
+	bootAt       time.Time
+	healthMarked bool
+	eng          *agent.Engine
 	// runMode 是启动时算好的安装形态（标准 / 所有用户 / 便携），
 	// 设置页每帧直接读它，避免每帧探测 U 盘写权限。
 	runMode string

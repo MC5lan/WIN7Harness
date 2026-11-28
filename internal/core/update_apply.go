@@ -137,6 +137,24 @@ func CheckUpdateArch(newExe, wantArch string) error {
 // applyWaitTries 是脚本等待旧进程退出的最大重试次数（每次约 1 秒）。
 const applyWaitTries = 30
 
+// updateHealthFile 是新版本启动成功后写下的健康标记。
+// 替换脚本在启动新版本后等待这个文件；60 秒内没出现就自动回滚。
+const updateHealthFile = "update-healthy.txt"
+
+// UpdateHealthPath 返回健康标记文件路径（与替换脚本共用）。
+func UpdateHealthPath() string { return filepath.Join(LocalDataDir(), updateHealthFile) }
+
+// MarkUpdateHealthy 由新版本在主循环稳定运行几秒后调用。
+// 写入版本与时间，便于替换脚本判断“新版本真的起来了”。
+func MarkUpdateHealthy() error {
+	p := UpdateHealthPath()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	data := []byte(Version + "\r\n" + time.Now().Format(time.RFC3339) + "\r\n")
+	return WriteFileAtomic(p, data, 0o644)
+}
+
 // ApplyScript 生成 Windows 替换脚本。
 // 不用 PowerShell（Win7 上可能被策略拦），只用 cmd 内建命令 + ping 做退避。
 func ApplyScript(exePath, newExe string, relaunch bool) string {
@@ -149,6 +167,8 @@ func ApplyScript(exePath, newExe string, relaunch bool) string {
 	b.WriteString("set \"TARGET=" + batValue(exePath) + "\"\r\n")
 	b.WriteString("set \"NEW=" + batValue(newExe) + "\"\r\n")
 	b.WriteString("set \"OLD=%TARGET%.old\"\r\n")
+	b.WriteString("set \"HEALTH=" + batValue(UpdateHealthPath()) + "\"\r\n")
+	b.WriteString("set \"NAME=" + batValue(filepath.Base(exePath)) + "\"\r\n")
 	b.WriteString("set TRIES=0\r\n")
 	b.WriteString(":wait\r\n")
 	b.WriteString("move /y \"%TARGET%\" \"%OLD%\" >nul 2>&1\r\n")
@@ -161,7 +181,25 @@ func ApplyScript(exePath, newExe string, relaunch bool) string {
 	b.WriteString("move /y \"%NEW%\" \"%TARGET%\" >nul 2>&1\r\n")
 	b.WriteString("if errorlevel 1 goto rollback\r\n")
 	if relaunch {
+		// 先清掉上一次的标记，再启动新版本；新版本稳定运行 3 秒后写入。
+		b.WriteString("del \"%HEALTH%\" >nul 2>&1\r\n")
 		b.WriteString("start \"\" \"%TARGET%\"\r\n")
+		b.WriteString("set WAIT=0\r\n")
+		b.WriteString(":health\r\n")
+		b.WriteString("if exist \"%HEALTH%\" goto healthy\r\n")
+		b.WriteString("set /a WAIT+=1\r\n")
+		b.WriteString("if %WAIT% geq 60 goto healthfail\r\n")
+		b.WriteString("ping -n 2 127.0.0.1 >nul\r\n")
+		b.WriteString("goto health\r\n")
+		b.WriteString(":healthy\r\n")
+		b.WriteString("del \"%HEALTH%\" >nul 2>&1\r\n")
+		b.WriteString(":healthfail\r\n")
+		b.WriteString("taskkill /f /im \"%NAME%\" >nul 2>&1\r\n")
+		b.WriteString("move /y \"%OLD%\" \"%TARGET%\" >nul 2>&1\r\n")
+		b.WriteString("start \"\" \"%TARGET%\"\r\n")
+		b.WriteString("echo 新版本未在 60 秒内完成启动，已自动回滚到原版本。 >\"%~dp0update_failed.txt\"\r\n")
+		b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
+		b.WriteString("exit /b 3\r\n")
 	}
 	b.WriteString("del \"%~f0\" >nul 2>&1\r\n")
 	b.WriteString("exit /b 0\r\n")

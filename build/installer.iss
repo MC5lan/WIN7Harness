@@ -708,18 +708,38 @@ end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
-  OldExe: String;
+  OldExe, NewExe, OldCopy: String;
 begin
   Result := '';
   NeedsRestart := False;
-  if IsPortableMode or SkipLegacy then
+  if IsPortableMode then
     Exit;
-  OldExe := ExpandConstant('{localappdata}\Win7Harness\Win7Harness.exe');
-  if FileExists(OldExe) then
+  // 升级不是“先删旧 exe 再装新 exe”：安装失败/断电时旧版本必须还在。
+  // 先改名为 .old 保留回滚副本，Inno 安装成功后再由程序启动时的
+  // CleanupOldExe 统一保留最新一份、清理更早的副本。
+  if not SkipLegacy then
   begin
-    if not DeleteFile(OldExe) then
-      Result := '检测到旧版 WIN7 Harness 正在运行。' + #13#10 +
-                '请先退出旧版程序，再重新运行安装包。';
+    OldExe := ExpandConstant('{localappdata}\Win7Harness\Win7Harness.exe');
+    if FileExists(OldExe) then
+    begin
+      OldCopy := OldExe + '.old';
+      DeleteFile(OldCopy);
+      if not RenameFile(OldExe, OldCopy) then
+        Result := '检测到旧版 WIN7 Harness 正在运行。' + #13#10 +
+                  '请先退出旧版程序，再重新运行安装包。';
+    end;
+  end;
+  if Result <> '' then
+    Exit;
+
+  NewExe := ExpandConstant('{app}\Win7Harness.exe');
+  if FileExists(NewExe) then
+  begin
+    OldCopy := NewExe + '.old';
+    DeleteFile(OldCopy);
+    if not RenameFile(NewExe, OldCopy) then
+      Result := '检测到当前版本的 WIN7 Harness 正在运行。' + #13#10 +
+                '请先退出程序，再重新运行安装包。';
   end;
 end;
 

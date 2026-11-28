@@ -47,9 +47,31 @@ if exist "%DEST%\unins000.exe" (
   exit /b 1
 )
 taskkill /f /im Win7Harness.exe >nul 2>nul
-copy /y "%SRCDIR%%EXE%" "%DEST%\Win7Harness.exe" >nul
+rem 事务式替换：先复制到 .new，再把旧 exe 改名为 .old，最后 move 到目标名。
+rem 任何一步失败都恢复 .old；安装成功也保留 .old 作为回滚副本。
+set "NEWEXE=%DEST%\Win7Harness.exe.new"
+set "OLDEXE=%DEST%\Win7Harness.exe.old"
+if exist "%NEWEXE%" del /f /q "%NEWEXE%" >nul 2>nul
+copy /y "%SRCDIR%%EXE%" "%NEWEXE%" >nul
 if errorlevel 1 (
-  echo   [x] copy failed. Is WIN7 Harness still running?
+  echo   [x] copy failed. Is the disk full or WIN7 Harness still running?
+  del /f /q "%NEWEXE%" >nul 2>nul
+  goto :fail
+)
+if exist "%DEST%\Win7Harness.exe" (
+  if exist "%OLDEXE%" del /f /q "%OLDEXE%" >nul 2>nul
+  move /y "%DEST%\Win7Harness.exe" "%OLDEXE%" >nul
+  if errorlevel 1 (
+    echo   [x] cannot move the old exe. Is WIN7 Harness still running?
+    del /f /q "%NEWEXE%" >nul 2>nul
+    goto :fail
+  )
+)
+move /y "%NEWEXE%" "%DEST%\Win7Harness.exe" >nul
+if errorlevel 1 (
+  echo   [x] replace failed, restoring the previous version...
+  if exist "%OLDEXE%" move /y "%OLDEXE%" "%DEST%\Win7Harness.exe" >nul
+  del /f /q "%NEWEXE%" >nul 2>nul
   goto :fail
 )
 if exist "%SRCDIR%win7harness.ico" copy /y "%SRCDIR%win7harness.ico" "%DEST%\win7harness.ico" >nul
