@@ -117,7 +117,8 @@ type Engine struct {
 	// 子 Agent 相关：depth=0 为主 Agent，>0 表示由 task 工具派生。
 	depth    int
 	maxRound int
-	// MaxToolRounds 主 Agent 单次请求的工具轮数上限；0 表示不限制（默认）。
+	// MaxToolRounds 主 Agent 单次请求的工具轮数上限；0 表示使用默认值
+	// DefaultToolRounds（120），正数按用户设置。
 	MaxToolRounds int
 	// ContextWindow 模型上下文窗口（token），用于算自动压缩阈值；0 用 128k 兜底。
 	ContextWindow int
@@ -328,20 +329,28 @@ func (e *Engine) emit(ev Event) {
 	}
 }
 
-// roundLimit 返回本引擎的单次请求工具轮数上限；0 表示不限制。
+// DefaultToolRounds 是主 Agent 单次请求的默认工具轮数上限。
+// 以前默认 0 = 不限制，失败计数又会被任意成功调用清零，长任务/跑飞模型
+// 可以无限消耗 token。120 轮足够覆盖大型重构，撞顶时会先问用户是否翻倍。
+const DefaultToolRounds = 120
+
+// roundLimit 返回本引擎的单次请求工具轮数上限；0 表示使用默认上限。
 //
 // 子 Agent 恒用 maxRound（必须封顶，否则一个跑飞的子代理能烧掉主预算）；
-// 主 Agent 用 MaxToolRounds，默认 0 = 不限。
+// 主 Agent 用 MaxToolRounds，未设置时回落到 DefaultToolRounds。
 //
 // 过去这里是硬编码 40 且到点直接报错停止。做稍大一点的重构必然撞顶：
 // 一次"读文件 → 改 → 跑构建 → 修"就是好几轮，40 轮只够动十几个文件。
-// 真正的护栏交给预算（MaxCost / BudgetTokens）和"同一错误反复出现"的拦截，
-// 不该用轮数去猜任务大小。
+// 真正的护栏仍然是预算（MaxCost / BudgetTokens）和"同一错误反复出现"的拦截；
+// 轮数只是最后一道防跑飞网，撞顶会询问用户而不是直接失败。
 func (e *Engine) roundLimit() int {
 	if e.maxRound > 0 {
 		return e.maxRound
 	}
-	return e.MaxToolRounds
+	if e.MaxToolRounds > 0 {
+		return e.MaxToolRounds
+	}
+	return DefaultToolRounds
 }
 
 func (e *Engine) loop(ctx context.Context) {
@@ -353,18 +362,17 @@ func (e *Engine) loop(ctx context.Context) {
 	verifyTries := 0
 	limit := e.roundLimit()
 	for round := 0; ; round++ {
-		// 只对"显式设了上限"的引擎生效；limit<=0 是完全不检查。
-		// 撞顶不再直接判失败：先问用户要不要继续（同意就把额度翻倍），
+		// 撞顶不再直接判失败：先问用户要不要继续（同意就翻倍），
 		// 用户拒绝或没有确认通道时才停——由用户决定，而不是由常量决定。
 		if limit > 0 && round >= limit {
-			note := fmt.Sprintf("已连续执行 %d 轮工具调用，达到你设置的上限。", round)
+			note := fmt.Sprintf("已连续执行 %d 轮工具调用，达到上限。", round)
 			if e.Confirm != nil && e.Confirm("继续执行？", note+"\n\n继续会消耗更多 token；也可以先停下看结果。") {
 				limit += limit
 				e.emit(Event{Kind: "notice", Text: fmt.Sprintf("%s已延长到 %d 轮。", note, limit)})
 			} else {
 				e.emit(Event{Kind: "error", Err: true,
 					Text: fmt.Sprintf("已暂停：本次请求执行了 %d 轮工具调用，达到上限（%d 轮）。"+
-						"结果都还在，发一句「继续」就能接着做；也可以在设置里把上限调大或设为 0（不限制）。", round, e.roundLimit())})
+						"结果都还在，发一句「继续」就能接着做；也可以在设置里把上限调大。", round, e.roundLimit())})
 				return
 			}
 		}
@@ -392,6 +400,7 @@ func (e *Engine) loop(ctx context.Context) {
 		msgs := e.buildContext()
 		var content, reasoning strings.Builder
 		var calls []pendingCall
+		finishReason := ""
 
 		e.emit(Event{Kind: "status", Text: "思考中…"})
 
@@ -407,6 +416,9 @@ func (e *Engine) loop(ctx context.Context) {
 			},
 			OnToolCall: func(name, args, id string) {
 				calls = append(calls, pendingCall{id: id, name: name, args: args})
+			},
+			OnFinish: func(reason string) {
+				finishReason = reason
 			},
 		})
 
@@ -436,6 +448,26 @@ func (e *Engine) loop(ctx context.Context) {
 				})
 				e.mu.Unlock()
 			}
+			return
+		}
+
+		// finish_reason=length 表示输出被 max_tokens 截断：工具参数可能只有半截，
+		// 继续执行 write_file/edit_file 会写入残缺内容。这里丢弃本轮工具调用，
+		// 只保留已生成正文，并明确提示用户。
+		if finishReason == "length" {
+			e.addUsage(usage)
+			if content.Len() > 0 {
+				e.mu.Lock()
+				e.Messages = append(e.Messages, llm.Message{
+					Role: "assistant", Content: content.String(), Reasoning: reasoning.String(),
+				})
+				e.mu.Unlock()
+			}
+			msg := "模型输出被截断（finish_reason=length），本轮工具调用已丢弃，未写入任何文件。请调大“最大输出 token”、缩小改动范围，或让模型分多次修改后重试。"
+			if len(calls) > 0 {
+				msg = fmt.Sprintf("模型输出被截断（finish_reason=length），已丢弃 %d 个可能不完整的工具调用，未写入任何文件。请调大“最大输出 token”或缩小改动范围后重试。", len(calls))
+			}
+			e.emit(Event{Kind: "error", Text: msg, Err: true})
 			return
 		}
 

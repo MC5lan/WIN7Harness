@@ -215,6 +215,9 @@ type Handlers struct {
 	// OnToolCall 在流结束时对每个完整工具调用回调一次
 	OnToolCall func(name, args, id string)
 	OnUsage    func(Usage)
+	// OnFinish 在收到 finish_reason 时回调（如 stop / length / tool_calls）。
+	// length 表示输出被 max_tokens 截断，调用方应丢弃工具调用并提示用户。
+	OnFinish func(reason string)
 }
 
 // ChatRequest 内部请求体。
@@ -616,6 +619,7 @@ func (c *Client) readSSETraced(resp *http.Response, h Handlers) (Usage, string, 
 	// 属于静默截断（代理超时、NAT 断链最常见），必须当错误处理才能触发续写。
 	sawDone := false
 	sawFinish := false
+	finishSent := false
 	malformed := 0
 
 	// 空闲看门狗：90 秒没有一个字节进来就认为流死了（NAT 掉线/假死代理），
@@ -670,6 +674,12 @@ func (c *Client) readSSETraced(resp *http.Response, h Handlers) (Usage, string, 
 		for _, choice := range ch.Choices {
 			if choice.FinishReason != "" {
 				sawFinish = true
+				if !finishSent {
+					finishSent = true
+					if h.OnFinish != nil {
+						h.OnFinish(choice.FinishReason)
+					}
+				}
 			}
 			d := choice.Delta
 			if d.ReasoningContent != "" {
