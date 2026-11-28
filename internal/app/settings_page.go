@@ -105,7 +105,7 @@ func (a *App) paintSettings(c *ui.Canvas) {
 		}
 		col := th.TextDim
 		if active {
-			col = 0xFFFFFF
+			col = readableOn(0xFFFFFF, th.Accent, 4.5)
 		} else if hover {
 			col = th.Text
 		}

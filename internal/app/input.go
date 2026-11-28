@@ -558,10 +558,10 @@ func drawSendButton(c *ui.Canvas, th *ui.Theme, r ui.Rect, canSend, streaming bo
 	fg := th.TextMute
 	if streaming {
 		bg = th.Danger
-		fg = 0xFFFFFF
+		fg = readableOn(0xFFFFFF, bg, 4.5)
 	} else if canSend {
 		bg = th.Accent
-		fg = 0xFFFFFF
+		fg = readableOn(0xFFFFFF, bg, 4.5)
 		if hover > 0 {
 			bg = ui.Blend(th.Accent, 0xFFFFFF, 0.10*hover)
 		}

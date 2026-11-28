@@ -270,7 +270,8 @@ func (u *UI) Button(id, label string, r ui.Rect, kind ButtonKind) bool {
 	var bg, fg, border uint32
 	switch kind {
 	case BtnPrimary:
-		bg, fg, border = th.Accent, 0xFFFFFF, th.Accent
+		bg, border = th.Accent, th.Accent
+		fg = readableOn(0xFFFFFF, bg, 4.5)
 		if hvt > 0 && !disabled {
 			bg = ui.Blend(th.Accent, 0xFFFFFF, 0.12*hvt)
 			border = bg
