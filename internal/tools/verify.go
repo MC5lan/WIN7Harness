@@ -170,11 +170,17 @@ func goPackageArgs(cwd string, changed []string) string {
 			return ""
 		}
 		dir := filepath.ToSlash(filepath.Dir(rel))
-		if dir == "." {
-			set["."] = true
-		} else {
-			set["./"+dir] = true
+		pkg := "."
+		if dir != "." {
+			pkg = "./" + dir
 		}
+		// 包路径会拼进 go test 命令行。目录名里的 & | ^ ( ) 等字符由
+		// testCommand 统一做 shell 引用；% 在 cmd.exe 双引号内仍会展开，
+		// 遇到就退回全量测试（go test ./...）。
+		if !safeShellArg(pkg) {
+			return ""
+		}
+		set[pkg] = true
 	}
 	if len(set) == 0 {
 		return ""

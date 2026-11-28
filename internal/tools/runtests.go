@@ -140,7 +140,11 @@ func testCommand(fw, extra, pkgArgs string) (string, bool) {
 	switch fw {
 	case "go":
 		if strings.TrimSpace(pkgArgs) != "" {
-			base = "go test " + strings.TrimSpace(pkgArgs)
+			if quoted, ok := quotePackageArgs(pkgArgs); ok {
+				base = "go test " + quoted
+			} else {
+				base = "go test ./..."
+			}
 		} else {
 			base = "go test ./..."
 		}
@@ -166,8 +170,8 @@ func testCommand(fw, extra, pkgArgs string) (string, bool) {
 }
 
 // sanitizeExtraArgs 校验要拼进测试命令的参数。
-// 只放行字母数字与正则元字符（-k/-run 的值需要），拒绝一切
-// cmd.exe 元字符（& | < > % " 空格之外的空白、换行）。
+// 只放行字母数字与正则元字符（-k/-run 的值需要）；每个 token 在拼接前
+// 还会被 shell 引用，避免 | & 等被 cmd.exe 当成管道/命令分隔符。
 var extraArgToken = regexp.MustCompile(`^[A-Za-z0-9._/^$*+?\[\]()|:=-]+$`)
 
 // allowedExtraFlags 允许出现的旗标（go/pytest/cargo 通用子集）。
@@ -188,6 +192,9 @@ func sanitizeExtraArgs(extra string) (string, error) {
 		if !extraArgToken.MatchString(t) {
 			return "", fmt.Errorf("参数包含不允许的字符：%q（只允许字母数字与 -_./^$*+?[]()|= 等）", t)
 		}
+		if !safeShellArg(t) {
+			return "", fmt.Errorf("参数包含 shell 展开字符：%q", t)
+		}
 		lt := strings.ToLower(t)
 		if strings.HasPrefix(t, "-") {
 			flag := lt
@@ -200,7 +207,7 @@ func sanitizeExtraArgs(extra string) (string, error) {
 			}
 			_ = hasValue
 		}
-		out = append(out, t)
+		out = append(out, quoteShellArg(t))
 	}
 	return strings.Join(out, " "), nil
 }
