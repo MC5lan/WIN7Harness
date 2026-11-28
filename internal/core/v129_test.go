@@ -3,6 +3,7 @@ package core
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -76,7 +77,11 @@ func TestApplyScriptRollback(t *testing.T) {
 		`set "TARGET=C:\tools\harness.exe"`,
 		`set "NEW=C:\tools\updates\new.exe"`,
 		`set "OLD=%TARGET%.old"`,
+		`set "HEALTH=`,
 		`set /a TRIES+=1`,
+		`:health`,
+		`:healthfail`,
+		`taskkill /f /im "%NAME%"`,
 		`:rollback`,
 		`:giveup`,
 		`start "" "%TARGET%"`,
@@ -102,6 +107,21 @@ func TestWriteApplyScriptAndCleanup(t *testing.T) {
 	}
 	if st, err := os.Stat(p); err != nil || st.Size() == 0 {
 		t.Fatal("脚本文件应存在且非空")
+	}
+}
+
+func TestMarkUpdateHealthy(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("WIN7HARNESS_HOME", dir)
+	if err := MarkUpdateHealthy(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(UpdateHealthPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), Version) {
+		t.Fatalf("健康标记缺少版本号：%q", b)
 	}
 }
 
