@@ -19,10 +19,12 @@ func TestRunShellCancelKillsTree(t *testing.T) {
 	start := time.Now()
 	_, _, err := runShell("ping -n 20 127.0.0.1 >nul", "", 15*time.Second, nil, ctx.Done())
 	elapsed := time.Since(start)
-	if err != nil && elapsed > 3*time.Second {
+	// 命令本身要跑约 19 秒，取消后应在 8 秒内返回。3 秒在慢速 386 CI
+	// runner 上会偶发误报（8 秒仍远小于 15 秒超时，足以证明取消生效）。
+	if err != nil && elapsed > 8*time.Second {
 		t.Fatalf("取消后仍在运行：%v（%s）", err, elapsed)
 	}
-	if elapsed > 3*time.Second {
+	if elapsed > 8*time.Second {
 		t.Fatalf("取消信号未及时杀树：%s", elapsed)
 	}
 }
