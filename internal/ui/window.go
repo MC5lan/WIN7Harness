@@ -594,8 +594,19 @@ func (w *Window) procPaint(h win32.HWND, msg uint32, wp, lp uintptr) uintptr {
 		return 0
 
 	case win32.WM_ACTIVATE:
+		// 失焦/切到后台时取消输入法组字：WM_IME_ENDCOMPOSITION 不保证到达，
+		// 残留 composing=true 会把后续键盘输入全部吞掉。
+		if wp == 0 {
+			w.composing = false
+			win32.CancelComposition(h)
+		}
 		// 从最小化/遮挡恢复时 Windows 可能补一块外部无效区；强制整块重贴。
 		w.forceFull = true
+		return 0
+
+	case win32.WM_KILLFOCUS:
+		w.composing = false
+		win32.CancelComposition(h)
 		return 0
 
 	case win32.WM_SHOWWINDOW:

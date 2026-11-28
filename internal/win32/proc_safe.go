@@ -142,6 +142,7 @@ var allProcs = []*syscall.LazyProc{
 	pImmGetContext,
 	pImmReleaseContext,
 	pImmSetCompositionWindow,
+	pImmNotifyIME,
 	pInvalidateRect,
 	pIsClipboardFormatAvailable,
 	pIsIconic,
