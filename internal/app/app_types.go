@@ -94,6 +94,8 @@ type App struct {
 	// lastCfgPublish 控制配置快照的发布频率：UI 线程每秒把 a.cfg 的
 	// 深拷贝发布到 core.current，工具 goroutine 只读快照，不再和设置页并发读写。
 	lastCfgPublish time.Time
+	// uiMu 保护 uiQueue：后台 goroutine 可以 queueUI，Timer 在 UI 线程消费。
+	uiMu sync.Mutex
 	// bootAt/healthMarked 用于更新后的启动健康标记：主循环稳定跑 3 秒后
 	// 写 update-healthy.txt，替换脚本据此判断新版本是否真的起来了。
 	bootAt       time.Time

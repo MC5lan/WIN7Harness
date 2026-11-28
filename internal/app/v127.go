@@ -79,7 +79,7 @@ func (a *App) initV127() {
 	updateConfigured := (manifestMode && strings.TrimSpace(a.cfg.UpdateURL) != "") ||
 		(!manifestMode && strings.TrimSpace(a.cfg.UpdateRepo) != "")
 	if a.cfg.CheckUpdateOnStart && updateConfigured {
-		go a.checkUpdateQuiet()
+		a.checkUpdateQuiet()
 	}
 }
 
@@ -251,23 +251,27 @@ func (a *App) drainWatch() {
 }
 
 // checkUpdateQuiet 启动时静默查一次更新，只提示不下载。
+// UI 线程取配置快照后把网络检查放后台，结果通过 updCh / notifyAsync 回到界面。
 func (a *App) checkUpdateQuiet() {
 	st := a.v27
-	if st == nil {
+	if st == nil || a.cfg == nil {
 		return
 	}
-	uc, newer, err := core.CheckUpdateAny(core.Version, a.cfg.UpdateSource, a.cfg.UpdateRepo,
-		strings.TrimSpace(a.cfg.UpdateURL), core.HTTPFetcher)
-	if err != nil || !newer {
-		return
-	}
-	select {
-	case st.updCh <- fmt.Sprintf("发现新版本 %s（当前 %s）。\n%s\n更新：/update 查看详情", uc.Version, core.Version, uc.Notes):
-	default:
-	}
-	if a.cfg.AutoDownloadUpdate {
-		go a.autoDownloadUpdate(uc)
-	}
+	cfg := a.cfg.Clone()
+	core.SafeGo("app/v127.go:checkUpdateQuiet", func() {
+		uc, newer, err := core.CheckUpdateAny(core.Version, cfg.UpdateSource, cfg.UpdateRepo,
+			strings.TrimSpace(cfg.UpdateURL), core.HTTPFetcher)
+		if err != nil || !newer {
+			return
+		}
+		select {
+		case st.updCh <- fmt.Sprintf("发现新版本 %s（当前 %s）。\n%s\n更新：/update 查看详情", uc.Version, core.Version, uc.Notes):
+		default:
+		}
+		if cfg.AutoDownloadUpdate {
+			a.autoDownloadUpdate(uc)
+		}
+	})
 }
 
 // autoDownloadUpdate 后台下载已校验的更新包并暂存，不替换正在运行的 exe。
@@ -276,22 +280,22 @@ func (a *App) autoDownloadUpdate(uc *core.UpdateCheck) {
 		return
 	}
 	if err := core.PrepareUpdate(core.UpdatesDir()); err != nil {
-		a.notify("更新包下载失败", err.Error(), true)
+		a.notifyAsync("更新包下载失败", err.Error(), true)
 		return
 	}
 	newExe, err := core.DownloadUpdate(uc.File, runtime.GOARCH, core.HTTPFetcher)
 	if err != nil {
-		a.notify("更新包下载失败", err.Error(), true)
+		a.notifyAsync("更新包下载失败", err.Error(), true)
 		return
 	}
 	if want := core.ExeArchOfSelf(); want != "" {
 		if err := core.CheckUpdateArch(newExe, want); err != nil {
-			a.notify("更新包架构不匹配", err.Error(), true)
+			a.notifyAsync("更新包架构不匹配", err.Error(), true)
 			return
 		}
 	}
 	_ = core.StageUpdate(core.UpdatesDir(), newExe)
-	a.notify("更新包已就绪", "版本 "+uc.Version+" 已通过 SHA256 与架构校验；重启后运行 /update apply 安装。", false)
+	a.notifyAsync("更新包已就绪", "版本 "+uc.Version+" 已通过 SHA256 与架构校验；重启后运行 /update apply 安装。", false)
 	core.Logf("auto-update: 已暂存 %s (%s)", newExe, uc.Version)
 }
 

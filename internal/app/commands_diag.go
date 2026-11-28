@@ -108,7 +108,7 @@ func (a *App) slashIndex(rest string) bool {
 // slashMCP 处理 /mcp 及别名。
 func (a *App) slashMCP(rest string) bool {
 	if strings.EqualFold(strings.TrimSpace(rest), "reload") {
-		core.SafeGo("app/commands.go:425", func() { a.bootMCP(true) })
+		a.bootMCP(true)
 		a.sysNote("正在重新连接 MCP 服务…")
 		return true
 	}

@@ -465,7 +465,7 @@ func (a *App) extSkillsBody(ktx *kit.Ctx, areaW int32) kit.Element {
 func (a *App) extMCPBody(ktx *kit.Ctx, areaW int32) kit.Element {
 	tk := ui.CurrentTokens()
 	reload := func() {
-		core.SafeGo("app/extpage.go:mcpReload", func() { a.bootMCP(true) })
+		a.bootMCP(true)
 		a.toast("正在重新连接 MCP 服务…", false)
 	}
 	st := mcp.Statuses()

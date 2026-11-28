@@ -101,6 +101,11 @@ func (a *App) notify(title, text string, isErr bool) {
 	a.toast(title+" "+text, isErr)
 }
 
+// notifyAsync 供后台 goroutine 使用：把通知投递回 UI 线程再执行。
+func (a *App) notifyAsync(title, text string, isErr bool) {
+	a.queueUI(func() { a.notify(title, text, isErr) })
+}
+
 // autoDiag 任务失败后自动导出诊断包（含脱敏配置、最近日志、环境信息）。
 // 只在真的失败时调用，且做了冷却。返回生成的路径，未生成时为空。
 func (a *App) autoDiag(reason string) string {

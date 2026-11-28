@@ -617,7 +617,7 @@ func (a *App) settingsNetTab(p *settingsPane) {
 	c.TextFace(ux+170, uy+2, "发现新版本时自动下载并校验（不会自动替换正在运行的程序）", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	uy += 40
 	if u.Button("set.updchecknow", "立即检查更新", ui.R(ux, uy, 120, 32), BtnPrimary) {
-		go a.checkUpdateQuiet()
+		a.checkUpdateQuiet()
 		a.toast("已在后台检查更新，结果会出现在通知里", false)
 	}
 	if u.Button("set.updapply", "安装已下载更新", ui.R(ux+130, uy, 140, 32), BtnGhost) {
