@@ -215,9 +215,28 @@ func runReadFile(ctx *Context, args map[string]interface{}) (Result, error) {
 	return Result{Output: out}, nil
 }
 
+// guardUNC 在访问 UNC 网络路径前要求用户确认。
+// 必须在任何 os.Stat/ReadDir/EvalSymlinks 之前调用：Windows 在建立 SMB
+// 连接时就会发起认证，等弹确认框时凭据已经可能泄露。
+func guardUNC(ctx *Context, p, action string) error {
+	if !core.IsUNCPath(p) {
+		return nil
+	}
+	if ctx.Confirm == nil {
+		return fmt.Errorf("%s 指向 UNC 网络路径，当前没有确认通道（子代理/无人值守），已拒绝：%s", action, p)
+	}
+	if !ctx.Confirm("访问 UNC 网络路径", fmt.Sprintf("%s 指向网络共享：\n%s\n\n访问可能触发 SMB/NTLM 认证，是否继续？", action, p)) {
+		return fmt.Errorf("用户拒绝%s UNC 路径 %s", action, p)
+	}
+	return nil
+}
+
 // guardEscapes 在路径越出工作区时请求用户确认。
 // 没有确认回调（如子代理、无人值守）就拒绝，避免 agent 用 ../ 静默改到工作区之外。
 func guardEscapes(ctx *Context, p, action string) error {
+	if err := guardUNC(ctx, p, action); err != nil {
+		return err
+	}
 	if !core.EscapesWorkDir(ctx.WorkDir, p) {
 		return nil
 	}
@@ -235,6 +254,9 @@ func guardEscapes(ctx *Context, p, action string) error {
 // 所以能弹确认就弹；无回调（子代理/无人值守）时拒绝——
 // “模型被网页注入后读 ~/.ssh/config 再发出去”的链路由此截断。
 func guardRead(ctx *Context, p, action string) error {
+	if err := guardUNC(ctx, p, action); err != nil {
+		return err
+	}
 	if !core.EscapesWorkDir(ctx.WorkDir, p) {
 		return nil
 	}
@@ -253,14 +275,16 @@ func runWriteFile(ctx *Context, args map[string]interface{}) (Result, error) {
 		return Result{}, err
 	}
 	content := Get(args, "content")
-	if other, ok := core.CaseInsensitiveCollision(p); ok {
-		return Result{}, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写，避免 Windows 上覆盖", other)
+	// 先过 UNC/越界守卫，再查系统目录/大小写冲突：后两者都会 Stat/ReadDir，
+	// UNC 路径会在确认之前就建立 SMB 连接，必须排在用户确认之后。
+	if err := guardEscapes(ctx, p, "写入"); err != nil {
+		return Result{}, err
 	}
 	if core.IsForbiddenPath(p) {
 		return Result{}, fmt.Errorf("拒绝写入系统保护目录: %s", p)
 	}
-	if err := guardEscapes(ctx, p, "写入"); err != nil {
-		return Result{}, err
+	if other, ok := core.CaseInsensitiveCollision(p); ok {
+		return Result{}, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写，避免 Windows 上覆盖", other)
 	}
 	existed := false
 	oldText := ""
@@ -342,11 +366,11 @@ func runEditFile(ctx *Context, args map[string]interface{}) (Result, error) {
 	if oldStr == "" {
 		return Result{}, fmt.Errorf("old_string 不能为空")
 	}
-	if core.IsForbiddenPath(p) {
-		return Result{}, fmt.Errorf("拒绝修改系统保护目录: %s", p)
-	}
 	if err := guardEscapes(ctx, p, "修改"); err != nil {
 		return Result{}, err
+	}
+	if core.IsForbiddenPath(p) {
+		return Result{}, fmt.Errorf("拒绝修改系统保护目录: %s", p)
 	}
 	text, meta, err := readTextFile(p)
 	if err != nil {
@@ -722,14 +746,14 @@ func runDelete(ctx *Context, args map[string]interface{}) (Result, error) {
 	if err := core.ValidateWindowsPathSyntax(p); err != nil {
 		return Result{}, err
 	}
-	if other, ok := core.CaseInsensitiveCollision(p); ok {
-		return Result{}, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写，避免误删", other)
+	if err := guardEscapes(ctx, p, "删除"); err != nil {
+		return Result{}, err
 	}
 	if core.IsForbiddenPath(p) {
 		return Result{}, fmt.Errorf("拒绝删除系统保护目录: %s", p)
 	}
-	if err := guardEscapes(ctx, p, "删除"); err != nil {
-		return Result{}, err
+	if other, ok := core.CaseInsensitiveCollision(p); ok {
+		return Result{}, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写，避免误删", other)
 	}
 	if ctx.Confirm == nil {
 		// fail-closed：没有确认通道就不删——删除不可逆（有快照，但语义不同，

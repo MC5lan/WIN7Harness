@@ -43,6 +43,22 @@ func forbiddenRoots() []string {
 
 var getenv = os.Getenv
 
+// IsUNCPath 判断路径是否指向 UNC 网络共享。
+// 访问 UNC 会在任何 Stat/ReadDir 之前触发 SMB 连接，可能泄露 NTLM 凭据，
+// 因此所有文件工具都要先要求用户确认。\\?\C:\... 是长路径命名空间，不算 UNC；
+// 只有 \\?\UNC\server\share 才是。
+func IsUNCPath(p string) bool {
+	p = strings.TrimSpace(p)
+	up := strings.ToUpper(p)
+	if strings.HasPrefix(up, `\\?\`) || strings.HasPrefix(up, `\??\`) {
+		return strings.HasPrefix(up, `\\?\UNC\`) || strings.HasPrefix(up, `\??\UNC\`)
+	}
+	if strings.HasPrefix(up, `\\.\`) {
+		return false
+	}
+	return strings.HasPrefix(p, `\\`) || strings.HasPrefix(p, `//`)
+}
+
 // ResolvePath 把相对路径解析到工作目录下，并清理 . / .. 。
 // 注意：清理只是规范化，并不阻止 ../ 跳出工作区，越界判断用 EscapesWorkDir。
 func ResolvePath(workDir, p string) string {

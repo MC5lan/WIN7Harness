@@ -172,6 +172,11 @@ func confirmPatchSelection(ctx *Context, dry bool, patches []filePatch) ([]fileP
 				if core.ValidateWindowsPathSyntax(abs) != nil {
 					continue
 				}
+				// UNC 的 SMB 连接不能在这里提前触发；buildPatchWrites 会
+				// 在 guardEscapes 里统一让用户确认。
+				if core.IsUNCPath(abs) {
+					continue
+				}
 				oldText, _, e := readTextFile(abs)
 				if e != nil {
 					continue
@@ -231,14 +236,14 @@ func buildPatchWrites(ctx *Context, patches []filePatch) ([]string, []patchWrite
 		if err := core.ValidateWindowsPathSyntax(p); err != nil {
 			return nil, nil, 0, err
 		}
-		if other, ok := core.CaseInsensitiveCollision(p); ok {
-			return nil, nil, 0, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写", other)
+		if err := guardEscapes(ctx, p, "修改"); err != nil {
+			return nil, nil, 0, err
 		}
 		if core.IsForbiddenPath(p) {
 			return nil, nil, 0, fmt.Errorf("拒绝修改系统保护目录: %s", p)
 		}
-		if err := guardEscapes(ctx, p, "修改"); err != nil {
-			return nil, nil, 0, err
+		if other, ok := core.CaseInsensitiveCollision(p); ok {
+			return nil, nil, 0, fmt.Errorf("目标与已有文件仅大小写不同：%s 已存在；请改用原大小写", other)
 		}
 
 		if fp.add {
