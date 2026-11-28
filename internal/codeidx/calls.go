@@ -4,6 +4,7 @@ package codeidx
 // 与符号索引互补：符号索引回答"在哪定义"，调用图回答"谁在用、用了谁"。
 
 import (
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // CallSite 一处调用点。
@@ -38,27 +40,62 @@ var (
 	graphMu   sync.Mutex
 	graphRoot string
 	graphVal  *CallGraph
+
+	graphFileMu sync.Mutex
+	graphFiles  = map[string]*fileGraph{}
+	graphParsed int64
 )
 
-// Graph 返回 root 的调用图（带缓存）。文件变动后由 ResetGraph 失效。
-func Graph(root string) *CallGraph {
-	graphMu.Lock()
-	defer graphMu.Unlock()
-	if graphVal != nil && graphRoot == root {
-		return graphVal
-	}
-	g := BuildGraph(root)
-	graphVal = g
-	graphRoot = root
-	return g
+// fileGraph 是单个 .go 文件解析出的调用贡献，用于跨 BuildGraph 复用。
+type fileGraph struct {
+	rel     string
+	mtime   int64
+	size    int64
+	funcs   int
+	decl    map[string]CallSite
+	callees map[string]map[string]bool
+	callers map[string][]CallSite
 }
 
-// ResetGraph 清空调用图缓存。
+// Graph 返回 root 的调用图（带缓存）。文件变动后由 ResetGraph / MarkDirtyAbs 失效。
+// 构建过程不长时间持有 graphMu，避免另一个 root 的查询被整图构建阻塞。
+func Graph(root string) *CallGraph {
+	graphMu.Lock()
+	if graphVal != nil && graphRoot == root {
+		g := graphVal
+		graphMu.Unlock()
+		return g
+	}
+	graphMu.Unlock()
+
+	g := BuildGraph(root)
+
+	graphMu.Lock()
+	if graphVal == nil || graphRoot != root {
+		graphVal = g
+		graphRoot = root
+	}
+	out := graphVal
+	graphMu.Unlock()
+	return out
+}
+
+// ResetGraph 清空调用图缓存（文件级解析缓存保留，MarkDirtyAbs 负责精确失效）。
 func ResetGraph() {
 	graphMu.Lock()
 	graphVal = nil
 	graphRoot = ""
 	graphMu.Unlock()
+}
+
+// invalidateGraphFile 让某个文件下一次 BuildGraph 重新解析。
+func invalidateGraphFile(abs string) {
+	if abs == "" {
+		return
+	}
+	graphFileMu.Lock()
+	delete(graphFiles, normKey(abs))
+	graphFileMu.Unlock()
 }
 
 // skipCallDir 跳过的目录，与符号索引保持一致。
@@ -70,7 +107,11 @@ func skipCallDir(name string) bool {
 	return strings.HasPrefix(name, ".")
 }
 
+// errStopGraphWalk 用于 filepath.Walk 达到文件上限时提前退出。
+var errStopGraphWalk = errors.New("call graph file limit reached")
+
 // BuildGraph 遍历 root 下所有 .go 文件建立调用图。
+// 每个文件的 AST 结果按 mtime/size 缓存，编辑一个文件后只重解析该文件。
 func BuildGraph(root string) *CallGraph {
 	g := &CallGraph{
 		Root:     root,
@@ -78,6 +119,8 @@ func BuildGraph(root string) *CallGraph {
 		callees:  map[string]map[string]bool{},
 		declFile: map[string]CallSite{},
 	}
+	seen := map[string]bool{}
+	count := 0
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -91,24 +134,92 @@ func BuildGraph(root string) *CallGraph {
 		if !strings.HasSuffix(strings.ToLower(info.Name()), ".go") {
 			return nil
 		}
+		if info.Size() > maxFileSz {
+			return nil
+		}
+		if count >= maxFiles {
+			return errStopGraphWalk
+		}
 		rel, rerr := filepath.Rel(root, path)
 		if rerr != nil {
 			rel = path
 		}
 		rel = filepath.ToSlash(rel)
-		g.parseFile(path, rel)
+		if fd := cachedFileGraph(path, rel, info); fd != nil {
+			g.merge(fd)
+			seen[normKey(path)] = true
+			count++
+		}
 		return nil
 	})
+	// 清理已删除文件的解析缓存，避免切换仓库/删文件后无限增长。
+	graphFileMu.Lock()
+	for key := range graphFiles {
+		if !seen[key] {
+			delete(graphFiles, key)
+		}
+	}
+	graphFileMu.Unlock()
 	return g
 }
 
-func (g *CallGraph) parseFile(abs, rel string) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, abs, nil, 0)
-	if err != nil || f == nil {
+func cachedFileGraph(abs, rel string, info os.FileInfo) *fileGraph {
+	key := normKey(abs)
+	mtime := info.ModTime().UnixNano()
+	graphFileMu.Lock()
+	if fd, ok := graphFiles[key]; ok && fd.rel == rel && fd.mtime == mtime && fd.size == info.Size() {
+		graphFileMu.Unlock()
+		return fd
+	}
+	graphFileMu.Unlock()
+
+	fd := parseFileData(abs, rel, mtime, info.Size())
+	if fd == nil {
+		return nil
+	}
+	graphFileMu.Lock()
+	graphFiles[key] = fd
+	graphFileMu.Unlock()
+	return fd
+}
+
+func (g *CallGraph) merge(fd *fileGraph) {
+	if fd == nil {
 		return
 	}
 	g.Files++
+	g.Funcs += fd.funcs
+	for name, site := range fd.decl {
+		g.declFile[name] = site
+	}
+	for from, set := range fd.callees {
+		if g.callees[from] == nil {
+			g.callees[from] = map[string]bool{}
+		}
+		for callee := range set {
+			g.callees[from][callee] = true
+		}
+	}
+	for callee, sites := range fd.callers {
+		g.callers[callee] = append(g.callers[callee], sites...)
+	}
+}
+
+func parseFileData(abs, rel string, mtime, size int64) *fileGraph {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, abs, nil, 0)
+	if err != nil || f == nil {
+		return nil
+	}
+	atomic.AddInt64(&graphParsed, 1)
+	fd := &fileGraph{
+		rel:     rel,
+		mtime:   mtime,
+		size:    size,
+		decl:    map[string]CallSite{},
+		callees: map[string]map[string]bool{},
+		callers: map[string][]CallSite{},
+	}
 	pos := func(p token.Pos) int { return fset.Position(p).Line }
 	for _, d := range f.Decls {
 		fn, ok := d.(*ast.FuncDecl)
@@ -121,10 +232,10 @@ func (g *CallGraph) parseFile(abs, rel string) {
 				name = r + "." + name
 			}
 		}
-		g.Funcs++
-		g.declFile[name] = CallSite{File: rel, Line: pos(fn.Pos()), From: name}
-		if g.callees[name] == nil {
-			g.callees[name] = map[string]bool{}
+		fd.funcs++
+		fd.decl[name] = CallSite{File: rel, Line: pos(fn.Pos()), From: name}
+		if fd.callees[name] == nil {
+			fd.callees[name] = map[string]bool{}
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
@@ -135,11 +246,12 @@ func (g *CallGraph) parseFile(abs, rel string) {
 			if callee == "" {
 				return true
 			}
-			g.callees[name][callee] = true
-			g.callers[callee] = append(g.callers[callee], CallSite{File: rel, Line: pos(call.Pos()), From: name})
+			fd.callees[name][callee] = true
+			fd.callers[callee] = append(fd.callers[callee], CallSite{File: rel, Line: pos(call.Pos()), From: name})
 			return true
 		})
 	}
+	return fd
 }
 
 // callName 从调用表达式里抽被调用名。

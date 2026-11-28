@@ -160,6 +160,7 @@ func MarkDirtyAbs(abs string) {
 	dirtyMu.Lock()
 	dirtySet[normKey(abs)] = true
 	dirtyMu.Unlock()
+	invalidateGraphFile(abs)
 	ResetGraph()
 }
 
