@@ -23,6 +23,14 @@ import os
 import re
 import sys
 
+# GitHub Windows runner 的控制台默认是 cp1252，直接 print 中文会
+# UnicodeEncodeError。统一改成 UTF-8，CI 与本地控制台行为一致。
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FORBIDDEN = [
