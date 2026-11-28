@@ -95,7 +95,7 @@ func TestGitHubManifestSignature(t *testing.T) {
 	defer func() { UpdatePublicKey = old }()
 
 	m := &UpdateManifest{Version: "2.0.3", Files: map[string]UpdateFile{
-		"amd64": {URL: "https://x/exe", SHA256: sum, Size: 1},
+		RuntimeArch(): {URL: "https://x/exe", SHA256: sum, Size: 1},
 	}}
 	if err := SignUpdateManifest(m, priv); err != nil {
 		t.Fatal(err)
