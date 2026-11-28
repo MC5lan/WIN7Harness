@@ -668,6 +668,15 @@ func (a *App) saveSettings() {
 		p := a.cfg.Provider()
 		p.BaseURL = core.NormalizeBaseURL(base)
 		p.APIKey = key
+		if key == "" && p.KeyLoaded {
+			// 用户明确清空了一个本次已成功解密的 Key：连密文一起删，
+			// 否则 forDisk 跳过空 Key，旧密文会在下次启动“复活”。
+			p.APIKeyEnc = ""
+			p.KeyLoaded = false
+		}
+		if key != "" {
+			p.KeyLoaded = true
+		}
 		p.Model = core.NormalizeModelID(p.BaseURL, model)
 		if fetched := a.modelsForBase(p.BaseURL); len(fetched) > 0 {
 			p.Models = append([]string{}, fetched...)

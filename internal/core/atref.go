@@ -31,8 +31,14 @@ func ExpandAtRefs(text, workDir string) string {
 		}
 		// 支持 @file.go:123 与 @file.go:120-180 的行段引用（补全选中符号时会带上行号）
 		rel, lineFrom, lineTo := ParsePathLineRef(rel)
-		p := ResolvePath(workDir, filepath.FromSlash(rel))
-		if IsForbiddenPath(p) {
+		relOS := filepath.FromSlash(rel)
+		// 绝对路径与 UNC 在 ResolvePath/Stat 之前就拒绝：否则 @C:\...
+		// 会绕过 read_file 的工作区守卫，@\\server\share 还会在确认前发起 SMB。
+		if filepath.IsAbs(relOS) || strings.HasPrefix(relOS, `\\`) || strings.HasPrefix(relOS, `//`) {
+			continue
+		}
+		p := ResolvePath(workDir, relOS)
+		if EscapesWorkDir(workDir, p) || IsForbiddenPath(p) {
 			continue
 		}
 		st, err := os.Stat(p)
