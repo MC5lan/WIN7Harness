@@ -3,6 +3,11 @@
 package core
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -56,5 +61,62 @@ func TestGitHubUpdateFileRequiresChecksum(t *testing.T) {
 	}{Name: "WIN7Harness-amd64.exe", BrowserDownloadURL: "https://example.com/x.exe"})
 	if _, err := GitHubUpdateFile(rel, "amd64", func(string) ([]byte, error) { return nil, nil }); err == nil {
 		t.Fatal("没有 SHA256SUMS.txt 时必须 fail-closed")
+	}
+}
+
+// GitHub 模式在正式构建（有 UpdatePublicKey）时必须同时验 latest.json 的签名。
+func TestGitHubManifestSignature(t *testing.T) {
+	const sum = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	rel := &GitHubRelease{TagName: "v2.0.3"}
+	rel.Assets = append(rel.Assets,
+		struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Size               int64  `json:"size"`
+		}{Name: "WIN7Harness-amd64.exe", BrowserDownloadURL: "https://x/exe"},
+		struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Size               int64  `json:"size"`
+		}{Name: "SHA256SUMS.txt", BrowserDownloadURL: "https://x/sums"},
+		struct {
+			Name               string `json:"name"`
+			BrowserDownloadURL string `json:"browser_download_url"`
+			Size               int64  `json:"size"`
+		}{Name: "latest.json", BrowserDownloadURL: "https://x/latest"},
+	)
+
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := UpdatePublicKey
+	UpdatePublicKey = base64.StdEncoding.EncodeToString(pub)
+	defer func() { UpdatePublicKey = old }()
+
+	m := &UpdateManifest{Version: "2.0.3", Files: map[string]UpdateFile{
+		"amd64": {URL: "https://x/exe", SHA256: sum, Size: 1},
+	}}
+	if err := SignUpdateManifest(m, priv); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := json.Marshal(m)
+	fetch := func(u string) ([]byte, error) {
+		switch u {
+		case "https://x/sums":
+			return []byte(sum + "  WIN7Harness-amd64.exe\n"), nil
+		case "https://x/latest":
+			return data, nil
+		}
+		return nil, fmt.Errorf("unexpected %s", u)
+	}
+	if err := verifyGitHubManifest(rel, UpdateFile{SHA256: sum}, fetch); err != nil {
+		t.Fatalf("合法签名应通过：%v", err)
+	}
+	if err := verifyGitHubManifest(rel, UpdateFile{SHA256: strings.Repeat("b", 64)}, fetch); err == nil {
+		t.Fatal("清单与 SHA256SUMS 不一致时应拒绝")
+	}
+	if err := verifyGitHubManifest(rel, UpdateFile{SHA256: sum}, func(string) ([]byte, error) { return []byte("{}"), nil }); err == nil {
+		t.Fatal("无签名清单应拒绝")
 	}
 }

@@ -41,7 +41,7 @@ jobs:
         # 没有配置 UPDATE_PUBKEY 时不再强制失败，避免 Release 被密钥卡住。
         env:
           UPDATE_PUBKEY: ${{ secrets.UPDATE_PUBKEY }}
-          REQUIRE_SIGNED: "0"
+          REQUIRE_SIGNED: "1"
         run: powershell -ExecutionPolicy Bypass -File build\build-release.ps1 -Test
       - name: 打包 ZIP
         shell: pwsh
@@ -53,14 +53,17 @@ jobs:
             $_.Name -ne (Split-Path $zip -Leaf) -and $_.Name -ne "SHA256SUMS.txt" -and $_.Name -ne "latest.json"
           }
           Compress-Archive -Path $files.FullName -DestinationPath $zip -CompressionLevel Optimal
-      - name: 生成更新清单（SHA256，签名可选）
+      - name: 生成更新清单（Ed25519 签名）
         shell: pwsh
         env:
           UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+          REQUIRE_SIGNED: "1"
         run: |
           $version = (Select-String -Path internal/core/config.go -Pattern '^const Version = "([^"]+)"').Matches[0].Groups[1].Value
           if ($env:UPDATE_PRIVATE_KEY) {
             go run ./tools/make_manifest -version $version -out dist/latest.json -key-from-env UPDATE_PRIVATE_KEY -dist dist
+          } elseif ($env:REQUIRE_SIGNED -eq "1") {
+            throw "REQUIRE_SIGNED=1 但缺少 UPDATE_PRIVATE_KEY：拒绝生成未签名 latest.json"
           } else {
             $base = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$version"
             $files = @{}
