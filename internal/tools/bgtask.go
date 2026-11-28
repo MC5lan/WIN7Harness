@@ -480,7 +480,7 @@ func startBackgroundCommand(ctx *Context, cmdline, cwd string, ttl time.Duration
 	if strings.TrimSpace(out) != "" {
 		b.WriteString("\n初始输出：\n" + clip(out, 2000))
 	}
-	b.WriteString("\n\n用 task_output(id) 读增量输出，task_kill(id) 终止。任务最长运行 20 分钟。")
+	b.WriteString(fmt.Sprintf("\n\n用 task_output(id) 读增量输出，task_kill(id) 终止。任务最长运行 %s。", ttl.Round(time.Second)))
 	return Result{Output: b.String()}, nil
 }
 

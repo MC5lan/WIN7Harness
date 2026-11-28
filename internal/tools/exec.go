@@ -44,6 +44,7 @@ func runCommand(ctx *Context, args map[string]interface{}) (Result, error) {
 	}
 	cwd := core.ResolvePath(ctx.WorkDir, Get(args, "cwd"))
 	timeout := GetInt(args, "timeout", 120)
+	_, hasTimeout := args["timeout"]
 	if timeout <= 0 {
 		timeout = 120
 	}
@@ -74,9 +75,12 @@ func runCommand(ctx *Context, args map[string]interface{}) (Result, error) {
 	}
 
 	if background {
-		ttl := time.Duration(timeout) * time.Second
-		if ttl <= 0 {
-			ttl = bgDefaultTTL
+		// 前台 timeout 的默认值 120s 不能直接当后台寿命：不传 timeout 的
+		// dev server/watch 应该活 20 分钟，而不是 2 分钟。只有显式传了
+		// timeout 才按用户的秒数限制。
+		ttl := bgDefaultTTL
+		if hasTimeout && timeout > 0 {
+			ttl = time.Duration(timeout) * time.Second
 		}
 		return startBackgroundCommand(ctx, cmdline, cwd, ttl)
 	}
