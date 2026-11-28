@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -202,9 +203,10 @@ func WriteApplyScript(dir, script string) (string, error) {
 
 // CleanupOldExe 清理上一版 .old（启动时调用）。
 // 关键修复（CR-P1-2）：此前**无条件删除**——新版首次启动就把唯一的回滚副本删了，
-// 换上的包要是起不来，用户就再无退路。现在只清理 30 天以上的 .old：
-// 最近一份永远保留，作为"新版本起不来时人工回滚"的唯一后悔药。
-// .old 文件名固定为 <当前exe名>.old，每次自更新覆盖同名文件，不会无限堆积。
+// 换上的包要是起不来，用户就再无退路。现在无条件保留最新一份 .old，
+// 其余超过 30 天的才清理。注意不能只看 .old 的 mtime：Windows 同卷 move
+// 会保留原 exe 的写入时间，上一版可能是几个月前安装的，按 mtime 会把唯一
+// 回滚副本误删。
 func CleanupOldExe(dir string) int {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -215,8 +217,11 @@ func CleanupOldExe(dir string) int {
 		return 0
 	}
 	base := filepath.Base(self)
-	cutoff := time.Now().Add(-30 * 24 * time.Hour)
-	removed := 0
+	type oldFile struct {
+		name  string
+		mtime time.Time
+	}
+	var olds []oldFile
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -229,10 +234,22 @@ func CleanupOldExe(dir string) int {
 		if err != nil {
 			continue
 		}
-		if info.ModTime().After(cutoff) {
-			continue // 保留：回滚副本
+		olds = append(olds, oldFile{name: name, mtime: info.ModTime()})
+	}
+	if len(olds) == 0 {
+		return 0
+	}
+	sort.Slice(olds, func(i, j int) bool { return olds[i].mtime.After(olds[j].mtime) })
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+	removed := 0
+	for i, f := range olds {
+		if i == 0 {
+			continue // 最新一份永远保留，作为回滚副本
 		}
-		if os.Remove(filepath.Join(dir, name)) == nil {
+		if f.mtime.After(cutoff) {
+			continue
+		}
+		if os.Remove(filepath.Join(dir, f.name)) == nil {
 			removed++
 		}
 	}
