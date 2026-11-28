@@ -27,15 +27,49 @@ var (
 	owned = map[string]string{}
 )
 
+const (
+	// 所有 MCP 服务共享的上下文预算。单服务 32 个工具的旧限制不够：
+	// 多个服务各塞 32 个工具仍可能把工具定义撑到几百 KB。
+	mcpMaxToolsTotal  = 64
+	mcpMaxSchemaTotal = 128 << 10 // 128KB JSON schema
+	mcpMaxDescTotal   = 16000     // 描述字符数
+)
+
+type mcpBudget struct {
+	tools  int
+	schema int
+	desc   int
+	skipped int
+}
+
+func newMCPBudget() *mcpBudget {
+	return &mcpBudget{tools: mcpMaxToolsTotal, schema: mcpMaxSchemaTotal, desc: mcpMaxDescTotal}
+}
+
+func (b *mcpBudget) take(schemaBytes, descRunes int) bool {
+	if b == nil {
+		return true
+	}
+	if b.tools <= 0 || schemaBytes > b.schema || descRunes > b.desc {
+		b.skipped++
+		return false
+	}
+	b.tools--
+	b.schema -= schemaBytes
+	b.desc -= descRunes
+	return true
+}
+
 // Boot 按配置连接全部启用的 MCP 服务，并把它们的工具并入工具集。
 // 返回每个服务的状态行；单个服务失败不影响其它服务。
 func Boot(specs []core.MCPServer) []Status {
 	var out []Status
+	budget := newMCPBudget()
 	for _, spec := range specs {
 		if !spec.Enabled {
 			continue
 		}
-		n, err := startOne(spec)
+		n, err := startOne(spec, budget)
 		st := Status{Name: spec.Name, Tools: n}
 		if err != nil {
 			st.Err = err.Error()
@@ -44,10 +78,14 @@ func Boot(specs []core.MCPServer) []Status {
 		}
 		out = append(out, st)
 	}
+	if budget.skipped > 0 {
+		core.Logf("mcp: 全局工具/schema 预算用尽，跳过 %d 个工具（上限：%d 个 / %d KB / %d 描述字符）",
+			budget.skipped, mcpMaxToolsTotal, mcpMaxSchemaTotal>>10, mcpMaxDescTotal)
+	}
 	return out
 }
 
-func startOne(spec core.MCPServer) (int, error) {
+func startOne(spec core.MCPServer, budget *mcpBudget) (int, error) {
 	c, err := Start(spec)
 	if err != nil {
 		return 0, err
@@ -97,6 +135,10 @@ func startOne(spec core.MCPServer) (int, error) {
 		// MCP 描述与 schema 都属于外部输入：限长，避免一个服务把工具定义撑爆。
 		desc = truncateRunes(desc, 2000)
 		desc = fmt.Sprintf("[MCP:%s] %s", server, desc)
+		if !budget.take(len(schema), len([]rune(desc))) {
+			core.Logf("mcp: 跳过 %s/%s（全局工具/schema 预算不足）", server, mcpName)
+			continue
+		}
 		tools.RegisterDynamic(tools.Tool{
 			Name:      toolName,
 			Desc:      desc,
