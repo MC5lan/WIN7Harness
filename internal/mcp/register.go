@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -111,7 +112,11 @@ func startOne(spec core.MCPServer) (int, error) {
 				if ctx != nil && ctx.Progress != nil {
 					ctx.Progress("MCP 调用：" + server + "/" + mcpName)
 				}
-				out, err := cli.CallTool(mcpName, args)
+				tctx := context.Background()
+				if ctx != nil && ctx.Ctx != nil {
+					tctx = ctx.Ctx
+				}
+				out, err := cli.CallToolContext(tctx, mcpName, args)
 				if err != nil {
 					return tools.Result{}, err
 				}
