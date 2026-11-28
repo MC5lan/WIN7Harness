@@ -124,6 +124,11 @@ jobs:
       - name: 单测（Linux 侧只跑可跨平台包）
         if: runner.os == 'Linux'
         run: go test ./internal/core/... ./internal/llm/... ./internal/eval/... ./internal/coreutil/... -count=1
+      - name: 编译 internal/tools 测试（Linux 侧只编译）
+        # tools 的运行测试大量依赖 Windows，但测试代码本身必须能在 Linux 编译；
+        # 之前 hooks_env_test.go 引用已删除的 withHookEnv，直到非 Windows 开发环境才暴露。
+        if: runner.os == 'Linux'
+        run: go test -c ./internal/tools -o /tmp/tools.test
       - name: 单测（Windows 全量）
         if: runner.os == 'Windows'
         run: go test ./... -count=1 -timeout 15m
