@@ -63,22 +63,26 @@ func (a *App) cmdMCPAdd(rest string) {
 			if tpl.Net {
 				msg += "\n若本机离线，请先在联网环境装好依赖。"
 			}
-			a.evCh <- agent.Event{Kind: "notice", Text: msg}
+			a.queueUI(func() {
+				a.evCh <- agent.Event{Kind: "notice", Text: msg}
+			})
 			return
 		}
-		if a.cfg == nil {
-			return
-		}
-		a.cfg.MCPServers = append(a.cfg.MCPServers, spec)
-		if err := a.cfg.Save(); err != nil {
-			a.evCh <- agent.Event{Kind: "notice", Text: "服务连通了，但配置保存失败：" + err.Error()}
-			return
-		}
-		// 已连上的这个进程不能直接接管，统一走一次重连，状态才不会分裂。
-		go a.bootMCP(true)
-		a.evCh <- agent.Event{Kind: "notice", Text: fmt.Sprintf(
-			"%s 安装成功：探测到 %d 个工具，已写入配置并重新连接。\n工具名形如 `mcp_%s_工具名`，可以直接让我调用。",
-			tpl.Name, n, tpl.ID)}
+		a.queueUI(func() {
+			if a.cfg == nil {
+				return
+			}
+			a.cfg.MCPServers = append(a.cfg.MCPServers, spec)
+			if err := a.cfg.Save(); err != nil {
+				a.evCh <- agent.Event{Kind: "notice", Text: "服务连通了，但配置保存失败：" + err.Error()}
+				return
+			}
+			// 已连上的这个进程不能直接接管，统一走一次重连，状态才不会分裂。
+			a.bootMCP(true)
+			a.evCh <- agent.Event{Kind: "notice", Text: fmt.Sprintf(
+				"%s 安装成功：探测到 %d 个工具，已写入配置并重新连接。\n工具名形如 `mcp_%s_工具名`，可以直接让我调用。",
+				tpl.Name, n, tpl.ID)}
+		})
 	})
 }
 

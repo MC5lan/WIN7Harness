@@ -57,8 +57,12 @@ func (a *App) runChecksNotify(notify bool) {
 	a.diag.loaded = true
 	a.diag.mu.Unlock()
 
+	var cfg *core.Config
+	if a.cfg != nil {
+		cfg = a.cfg.Clone()
+	}
 	core.SafeGo("app/diag.go:62", func() {
-		res := core.RunChecks(a.cfg)
+		res := core.RunChecks(cfg)
 		a.diag.mu.Lock()
 		a.diag.results = res
 		a.diag.ranAt = time.Now()
@@ -76,14 +80,16 @@ func (a *App) runChecksNotify(notify bool) {
 					warns++
 				}
 			}
-			switch {
-			case fails > 0:
-				a.toast("自检发现 "+strconv.Itoa(fails)+" 项异常，按 Ctrl+K 搜“自检”查看", true)
-			case warns > 0:
-				a.toast("自检完成："+strconv.Itoa(warns)+" 项提醒，其余正常", false)
-			default:
-				a.toast("环境自检全部通过", false)
-			}
+			a.queueUI(func() {
+				switch {
+				case fails > 0:
+					a.toast("自检发现 "+strconv.Itoa(fails)+" 项异常，按 Ctrl+K 搜“自检”查看", true)
+				case warns > 0:
+					a.toast("自检完成："+strconv.Itoa(warns)+" 项提醒，其余正常", false)
+				default:
+					a.toast("环境自检全部通过", false)
+				}
+			})
 		}
 		a.Redraw()
 	})
@@ -107,7 +113,7 @@ func (a *App) runEndToEndAsync() {
 	a.diag.mu.Unlock()
 	a.Redraw()
 
-	cfg := a.cfg
+	cfg := a.cfg.Clone()
 	core.SafeGo("app/diag.go:116", func() {
 		opt := selftest.Options{
 			Timeout: 40 * time.Second,
@@ -140,13 +146,15 @@ func (a *App) runEndToEndAsync() {
 		a.diag.mu.Unlock()
 
 		core.Logf("端到端自检完成：通过 %d，失败 %d，跳过 %d", rep.Count(selftest.StatusPass), rep.Count(selftest.StatusFail), rep.Count(selftest.StatusSkip))
-		if err != nil {
-			a.toast("自检报告保存失败："+err.Error(), true)
-		} else if rep.OK() {
-			a.toast(fmt.Sprintf("自检全部通过（通过率 %.0f%%）", rep.PassRate()), false)
-		} else {
-			a.toast(fmt.Sprintf("自检发现 %d 项失败，按 Ctrl+K 搜“自检”查看", rep.Count(selftest.StatusFail)), true)
-		}
+		a.queueUI(func() {
+			if err != nil {
+				a.toast("自检报告保存失败："+err.Error(), true)
+			} else if rep.OK() {
+				a.toast(fmt.Sprintf("自检全部通过（通过率 %.0f%%）", rep.PassRate()), false)
+			} else {
+				a.toast(fmt.Sprintf("自检发现 %d 项失败，按 Ctrl+K 搜“自检”查看", rep.Count(selftest.StatusFail)), true)
+			}
+		})
 		a.Redraw()
 
 		// 自检完成后顺手把日志尾部载入，供日志 tab 查看
@@ -156,14 +164,14 @@ func (a *App) runEndToEndAsync() {
 
 // exportDiag 导出诊断包并在完成后提示路径。
 func (a *App) exportDiag() {
+	opt := a.withMetricsExtra(core.DefaultDiagOptions())
 	core.SafeGo("app/diag.go:169", func() {
-		opt := a.withMetricsExtra(core.DefaultDiagOptions())
 		p, err := core.ExportDiag("", opt)
 		if err != nil {
-			a.toast("导出失败："+err.Error(), true)
+			a.queueUI(func() { a.toast("导出失败："+err.Error(), true) })
 			return
 		}
-		a.toast("诊断包已导出："+p, false)
+		a.queueUI(func() { a.toast("诊断包已导出："+p, false) })
 	})
 }
 

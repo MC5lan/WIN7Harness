@@ -120,7 +120,7 @@ func New(cfg *core.Config, w *ui.Window) *App {
 	// 会话中心索引在后台预热：用户点开"会话中心"时不用等第一次解析。
 	core.SafeGo("app/pages_kit.go:preloadSessions", func() { a.triggerSessionIndex() })
 	// MCP 服务在后台连接，失败不影响主界面
-	go a.bootMCP(false)
+	a.bootMCP(false)
 	return a
 }
 
@@ -524,19 +524,24 @@ func (a *App) Cursor() int {
 }
 
 func (a *App) queueUI(fn func()) {
-	if fn != nil {
-		a.uiQueue = append(a.uiQueue, fn)
+	if fn == nil {
+		return
 	}
+	a.uiMu.Lock()
+	a.uiQueue = append(a.uiQueue, fn)
+	a.uiMu.Unlock()
 }
 
 // runUIQueue 在 Timer 里执行 Paint 期间排队的慢动作（保存、系统对话框等）。
 // 执行前先清空切片：动作里再 queueUI 的会落到下一轮，避免同一帧无限递归。
 func (a *App) runUIQueue() {
-	if len(a.uiQueue) == 0 {
-		return
-	}
+	a.uiMu.Lock()
 	q := a.uiQueue
 	a.uiQueue = nil
+	a.uiMu.Unlock()
+	if len(q) == 0 {
+		return
+	}
 	for _, fn := range q {
 		fn()
 	}
