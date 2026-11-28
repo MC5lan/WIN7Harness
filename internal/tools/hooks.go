@@ -38,6 +38,15 @@ func hookMatch(pattern, tool string) bool {
 	return false
 }
 
+// hookEnv 返回注入钩子命令的 HARNESS_* 环境变量。
+func hookEnv(event, tool, workdir string) []string {
+	return []string{
+		"HARNESS_EVENT=" + event,
+		"HARNESS_TOOL=" + tool,
+		"HARNESS_WORKDIR=" + workdir,
+	}
+}
+
 // RunHooks 执行某个事件下的钩子命令，返回是否阻止后续动作以及要展示给模型的文本。
 // pre_tool 的钩子以非零退出码结束即视为阻止。
 func RunHooks(event, tool string, ctx *Context) (block bool, note string) {
@@ -75,11 +84,7 @@ func RunHooks(event, tool string, ctx *Context) (block bool, note string) {
 		start := time.Now()
 		// HARNESS_* 环境变量经 extraEnv 传入（不拼进命令行）：
 		// 值含 %VAR%、空格、引号都不再参与 shell 解析，也不存在拼接注入。
-		out, code, err := runShell(cmdline, ctx.WorkDir, time.Duration(timeout)*time.Second, []string{
-			"HARNESS_EVENT=" + event,
-			"HARNESS_TOOL=" + name,
-			"HARNESS_WORKDIR=" + ctx.WorkDir,
-		}, ctxDone(ctx))
+		out, code, err := runShell(cmdline, ctx.WorkDir, time.Duration(timeout)*time.Second, hookEnv(event, name, ctx.WorkDir), ctxDone(ctx))
 		used := time.Since(start).Milliseconds()
 		out = sanitizeHookOutput(out, 4000)
 		b.WriteString(fmt.Sprintf("%s\n退出码: %d，耗时: %dms\n", line, code, used))
