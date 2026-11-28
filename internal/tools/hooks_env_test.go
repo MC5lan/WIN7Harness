@@ -10,8 +10,8 @@ import (
 
 // 验证钩子命令确实能拿到 HARNESS_* 环境变量。
 func TestHookEnvInjection(t *testing.T) {
-	cmdline := withHookEnv(`echo "$HARNESS_EVENT|$HARNESS_TOOL|$HARNESS_WORKDIR"`, HookPreTool, "write_file", "/tmp")
-	out, code, err := runShell(cmdline, "/tmp", 10*time.Second, nil)
+	cmdline := `echo "$HARNESS_EVENT|$HARNESS_TOOL|$HARNESS_WORKDIR"`
+	out, code, err := runShell(cmdline, "/tmp", 10*time.Second, hookEnv(HookPreTool, "write_file", "/tmp"))
 	if err != nil && out == "" {
 		t.Fatalf("执行失败: %v", err)
 	}
