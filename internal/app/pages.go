@@ -81,6 +81,7 @@ func (a *App) applyPreset(i int) {
 // 免得看不见的表单框还在接收键入。
 func (a *App) onbGo(step int) {
 	a.onbStep = step
+	a.onboardScrl = 0
 	if a.ui != nil {
 		if step == 1 {
 			a.ui.SetFocus("ob.base")
@@ -108,8 +109,11 @@ func (a *App) paintOnboard(c *ui.Canvas) {
 		cw = W - 96
 	}
 	ch := H - 64
-	if ch > 600 {
-		ch = 600
+	if ch > 700 {
+		ch = 700
+	}
+	if ch < 240 {
+		ch = 240
 	}
 	card := ui.R((W-cw)/2, (H-ch)/2, cw, ch)
 	c.Round(card, 12, th.Card)
@@ -210,13 +214,33 @@ func (a *App) paintOnboardForm(c *ui.Canvas, card ui.Rect) {
 	yy += 40
 	c.TextFace(x, yy, "选择一个接入方式，或直接填任意 OpenAI 兼容地址。", ui.FsSm, 400, th.TextDim, ui.FaceUI)
 	yy += 26
-	yy = a.paintOnboardPresets(c, x, iw, yy)
-	yy = a.paintOnboardFields(c, x, iw, yy)
-	yy = a.paintOnboardWorkDir(c, x, iw, yy)
-	a.paintOnboardFooter(c, card, x, iw, yy)
 
-	// 键盘：Tab 切焦点
-	_ = win32.VK_TAB
+	// 内容区可滚动：低分辨率 + 高 DPI 下表单比卡片高，不能让字段
+	// 和底部“开始使用”重叠。头部和页脚固定，只有中间表单滚动。
+	contentTop := yy
+	contentBottom := card.Bottom() - 80
+	viewH := contentBottom - contentTop
+	if viewH < 40 {
+		viewH = 40
+	}
+	contentY := contentTop - int32(a.onboardScrl)
+	c.Clip(ui.R(card.X+1, contentTop, card.W-2, viewH))
+	contentY = a.paintOnboardPresets(c, x, iw, contentY)
+	contentY = a.paintOnboardFields(c, x, iw, contentY)
+	contentY = a.paintOnboardWorkDir(c, x, iw, contentY)
+	contentY = a.paintOnboardTestMsg(c, x, iw, contentY)
+	c.PopClip()
+	a.onboardH = contentY - contentTop
+	if a.onboardH < 0 {
+		a.onboardH = 0
+	}
+	if max := float32(a.onboardH - viewH); a.onboardScrl > max {
+		a.onboardScrl = max
+	}
+	if a.onboardScrl < 0 {
+		a.onboardScrl = 0
+	}
+	a.paintOnboardFooter(c, card, x, iw)
 }
 
 // paintOnboardPresets 绘制接入方式 chips，返回下一个 y。
@@ -363,23 +387,28 @@ func (a *App) paintOnboardWorkDir(c *ui.Canvas, x, iw, yy int32) int32 {
 	return yy
 }
 
-// paintOnboardFooter 绘制测试结果与开始按钮。
-func (a *App) paintOnboardFooter(c *ui.Canvas, card ui.Rect, x, iw, yy int32) {
+// paintOnboardTestMsg 绘制测试连接结果（在滚动区内），返回下一个 y。
+func (a *App) paintOnboardTestMsg(c *ui.Canvas, x, iw, yy int32) int32 {
+	th := a.th
+	if a.testMsg == "" {
+		return yy
+	}
+	col := th.TextMute
+	if a.testOK != nil {
+		if *a.testOK {
+			col = th.Success
+		} else {
+			col = th.Danger
+		}
+	}
+	c.TextFace(x, yy, ellipsis(c, a.testMsg, ui.FsXs, 400, iw), ui.FsXs, 400, col, ui.FaceUI)
+	return yy + 22
+}
+
+// paintOnboardFooter 绘制固定在卡片底部的返回 / 开始按钮。
+func (a *App) paintOnboardFooter(c *ui.Canvas, card ui.Rect, x, iw int32) {
 	th := a.th
 	u := a.ui
-	// 测试结果
-	if a.testMsg != "" {
-		col := th.TextMute
-		if a.testOK != nil {
-			if *a.testOK {
-				col = th.Success
-			} else {
-				col = th.Danger
-			}
-		}
-		c.TextFace(x, yy, ellipsis(c, a.testMsg, ui.FsXs, 400, iw), ui.FsXs, 400, col, ui.FaceUI)
-		yy += 22
-	}
 
 	// 底部：分隔线 + 返回 / 开始
 	by := card.Bottom() - 64

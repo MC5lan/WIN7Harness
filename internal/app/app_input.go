@@ -360,6 +360,34 @@ func (a *App) MouseWheel(x, y int32, delta int32) {
 		}
 		return
 	}
+	if a.page == PageOnboard {
+		// 只滚连接模型页（step 1），欢迎页固定居中。
+		if a.onbStep != 1 {
+			return
+		}
+		ch := a.winH - 64
+		if ch > 700 {
+			ch = 700
+		}
+		cardY := (a.winH - ch) / 2
+		if y < cardY+92 || y > cardY+ch-80 {
+			return
+		}
+		view := float32(ch - 172)
+		max := float32(a.onboardH) - view
+		if max < 0 {
+			max = 0
+		}
+		a.onboardScrl += float32(step) * 64
+		if a.onboardScrl < 0 {
+			a.onboardScrl = 0
+		}
+		if a.onboardScrl > max {
+			a.onboardScrl = max
+		}
+		a.Redraw()
+		return
+	}
 	if a.page != PageChat {
 		return
 	}
