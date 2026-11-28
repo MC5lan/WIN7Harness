@@ -255,6 +255,49 @@ type Config struct {
 	PermDirs []string `json:"perm_dirs,omitempty"`
 }
 
+// Clone 返回配置的深拷贝。配置一旦发布到 current，就不再原地修改：
+// UI 持有自己的副本，Get() 返回只读快照，避免工具 goroutine 与设置页并发读写。
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.Providers = make([]Provider, len(c.Providers))
+	for i, p := range c.Providers {
+		p.Models = append([]string(nil), p.Models...)
+		cp.Providers[i] = p
+	}
+	cp.RecentDirs = append([]string(nil), c.RecentDirs...)
+	cp.DisabledSkills = append([]string(nil), c.DisabledSkills...)
+	cp.PermRules = append([]string(nil), c.PermRules...)
+	cp.PermDirs = append([]string(nil), c.PermDirs...)
+	if c.KeyBindings != nil {
+		cp.KeyBindings = make(map[string]string, len(c.KeyBindings))
+		for k, v := range c.KeyBindings {
+			cp.KeyBindings[k] = v
+		}
+	}
+	cp.Hooks = append([]Hook(nil), c.Hooks...)
+	cp.MCPServers = make([]MCPServer, len(c.MCPServers))
+	for i, m := range c.MCPServers {
+		m.Args = append([]string(nil), m.Args...)
+		m.Env = append([]string(nil), m.Env...)
+		m.Headers = append([]string(nil), m.Headers...)
+		cp.MCPServers[i] = m
+	}
+	return &cp
+}
+
+// PublishConfig 把 UI 的配置副本发布成只读快照。调用方应只在 UI 线程调用。
+func PublishConfig(c *Config) {
+	if c == nil {
+		return
+	}
+	cfgMu.Lock()
+	current = c.Clone()
+	cfgMu.Unlock()
+}
+
 var (
 	cfgMu   sync.RWMutex
 	current *Config
@@ -540,7 +583,7 @@ func Load() *Config {
 	c.Normalize()
 	// 老版本把所有数据放在漫游 %APPDATA%；首次升级时把大目录迁到本机。
 	MigrateLocalData()
-	current = c
+	current = c.Clone()
 	// 内存档位是全局运行时状态，配置一加载就同步，保证所有入口行为一致。
 	SetLowMemory(c.LowMemory)
 	return c
@@ -808,11 +851,14 @@ func UnlockPortableSecrets(password string) error {
 	if err := json.Unmarshal(plain, &payload); err != nil {
 		return fmt.Errorf("U 盘密钥内容损坏：%w", err)
 	}
-	for i := range current.Providers {
-		if k, ok := payload.Keys[current.Providers[i].ID]; ok {
-			current.Providers[i].APIKey = k
+	cp := current.Clone()
+	for i := range cp.Providers {
+		if k, ok := payload.Keys[cp.Providers[i].ID]; ok {
+			cp.Providers[i].APIKey = k
+			cp.Providers[i].KeyLoaded = true
 		}
 	}
+	current = cp
 	portablePassword = password
 	portableLocked = false
 	return nil
@@ -838,11 +884,14 @@ func ClearPortableSecrets() error {
 	if current == nil {
 		return errors.New("配置尚未加载")
 	}
-	current.PortableSecrets = ""
-	for i := range current.Providers {
-		current.Providers[i].APIKey = ""
-		current.Providers[i].APIKeyEnc = ""
+	cp := current.Clone()
+	cp.PortableSecrets = ""
+	for i := range cp.Providers {
+		cp.Providers[i].APIKey = ""
+		cp.Providers[i].APIKeyEnc = ""
+		cp.Providers[i].KeyLoaded = false
 	}
+	current = cp
 	portablePassword = ""
 	portableLocked = false
 	return nil
