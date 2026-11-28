@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,6 +98,30 @@ func (r *ringBuffer) String() string {
 	return string(r.buf)
 }
 
+// mcpBaseEnv 只给 MCP 子进程传递运行所需的基础环境变量。
+// 直接继承 os.Environ() 会把 OPENAI_API_KEY、GITHUB_TOKEN、云凭据等
+// 一起交给第三方 MCP 服务；这里按白名单过滤，服务自己的变量用 spec.Env 显式传。
+func mcpBaseEnv() []string {
+	allow := map[string]bool{
+		"PATH": true, "PATHEXT": true, "SYSTEMROOT": true, "WINDIR": true,
+		"TEMP": true, "TMP": true, "USERPROFILE": true, "HOMEDRIVE": true,
+		"HOMEPATH": true, "APPDATA": true, "LOCALAPPDATA": true, "COMSPEC": true,
+		"HOME": true, "LANG": true, "LC_ALL": true, "TZ": true,
+		"HTTP_PROXY": true, "HTTPS_PROXY": true, "NO_PROXY": true, "ALL_PROXY": true,
+	}
+	out := make([]string, 0, len(allow))
+	for _, kv := range os.Environ() {
+		k := kv
+		if i := strings.IndexByte(k, '='); i >= 0 {
+			k = k[:i]
+		}
+		if allow[strings.ToUpper(k)] {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
 // Start 建立 MCP 连接并完成初始化握手。
 // 配了 url 走远程 HTTP/SSE，否则按 command 起本地子进程。
 func Start(spec core.MCPServer) (*Client, error) {
@@ -110,7 +135,7 @@ func Start(spec core.MCPServer) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	cmd.Env = append(os.Environ(), spec.Env...)
+	cmd.Env = append(mcpBaseEnv(), spec.Env...)
 	cmd.Env = append(cmd.Env, "PYTHONIOENCODING=utf-8")
 	hideMCPWindow(cmd)
 
@@ -181,7 +206,7 @@ func (c *Client) initialize() error {
 			Version string `json:"version"`
 		} `json:"serverInfo"`
 	}
-	if err := c.call("initialize", params, &res, 30*time.Second); err != nil {
+	if err := c.callContext(context.Background(), "initialize", params, &res, 30*time.Second); err != nil {
 		return fmt.Errorf("初始化失败：%s（%s）", err, c.stderrTail())
 	}
 	// 按协议补一条 initialized 通知，失败不影响使用
@@ -194,7 +219,7 @@ func (c *Client) ListTools() ([]ToolInfo, error) {
 	var res struct {
 		Tools []ToolInfo `json:"tools"`
 	}
-	if err := c.call("tools/list", map[string]interface{}{}, &res, 30*time.Second); err != nil {
+	if err := c.callContext(context.Background(), "tools/list", map[string]interface{}{}, &res, 30*time.Second); err != nil {
 		return nil, err
 	}
 	return res.Tools, nil
@@ -202,6 +227,15 @@ func (c *Client) ListTools() ([]ToolInfo, error) {
 
 // CallTool 调用一个工具并返回文本结果。
 func (c *Client) CallTool(name string, args map[string]interface{}) (string, error) {
+	return c.CallToolContext(context.Background(), name, args)
+}
+
+// CallToolContext 与 CallTool 相同，但接收调用方 ctx：用户点停止时立即
+// 取消等待并杀掉 MCP 子进程，而不是继续阻塞到 120 秒超时。
+func (c *Client) CallToolContext(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if args == nil {
 		args = map[string]interface{}{}
 	}
@@ -213,7 +247,7 @@ func (c *Client) CallTool(name string, args map[string]interface{}) (string, err
 		IsError bool `json:"isError"`
 	}
 	params := map[string]interface{}{"name": name, "arguments": args}
-	if err := c.call("tools/call", params, &res, 120*time.Second); err != nil {
+	if err := c.callContext(ctx, "tools/call", params, &res, 120*time.Second); err != nil {
 		return "", err
 	}
 	var b strings.Builder
@@ -259,7 +293,26 @@ func (c *Client) notify(method string, params interface{}) error {
 }
 
 // call 发送请求并读取匹配 id 的响应。请求串行化，读到不匹配的通知帧直接跳过。
-func (c *Client) call(method string, params interface{}, out interface{}, timeout time.Duration) error {
+// maxMCPLineBytes 限制单条 stdio JSON 行的大小；恶意/损坏服务发一行超长
+// 输出时，ReadBytes 会无限扩容，32 位进程直接 OOM。
+const maxMCPLineBytes = 8 << 20
+
+func readMCPLine(r *bufio.Reader) ([]byte, error) {
+	var out []byte
+	for {
+		frag, err := r.ReadSlice('\n')
+		if len(out)+len(frag) > maxMCPLineBytes {
+			return nil, fmt.Errorf("MCP 单行输出超过 %d 字节", maxMCPLineBytes)
+		}
+		out = append(out, frag...)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return out, err
+	}
+}
+
+func (c *Client) callContext(ctx context.Context, method string, params interface{}, out interface{}, timeout time.Duration) error {
 	if c.remote != nil {
 		return c.remote.call(method, params, out, timeout)
 	}
@@ -291,7 +344,7 @@ func (c *Client) call(method string, params interface{}, out interface{}, timeou
 	ch := make(chan readResult, 1)
 	core.SafeGo("mcp/client.go:275", func() {
 		for {
-			l, err := c.reader.ReadBytes('\n')
+			l, err := readMCPLine(c.reader)
 			if err != nil {
 				ch <- readResult{nil, err}
 				return
@@ -344,6 +397,11 @@ func (c *Client) call(method string, params interface{}, out interface{}, timeou
 		c.killTree()
 		_ = c.reap(3 * time.Second)
 		return fmt.Errorf("%s 超时（%s）%s", method, timeout, c.stderrTail())
+	case <-ctx.Done():
+		c.closed = true
+		c.killTree()
+		_ = c.reap(3 * time.Second)
+		return ctx.Err()
 	}
 }
 
