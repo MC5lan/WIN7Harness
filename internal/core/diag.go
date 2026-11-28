@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -112,7 +113,7 @@ func envDump() string {
 	fmt.Fprintf(&b, "数据目录: %s\r\n", LocalDataDir())
 	if c := Get(); c != nil {
 		fmt.Fprintf(&b, "工作目录: %s\r\n", c.WorkDir)
-		fmt.Fprintf(&b, "活动端点: %s\r\n", c.Provider().BaseURL)
+		fmt.Fprintf(&b, "活动端点: %s\r\n", maskURLSecrets(c.Provider().BaseURL))
 		fmt.Fprintf(&b, "模型: %s\r\n", c.Model)
 	}
 	if free, total, err := diskFree(LocalDataDir()); err == nil {
@@ -138,7 +139,7 @@ func RedactedConfigJSON() string {
 		cp.Providers[i].APIKey = maskSecret(cp.Providers[i].APIKey)
 		// 密文也不该出现在支持包里：虽然解不开，但没必要暴露。
 		cp.Providers[i].APIKeyEnc = ""
-		cp.Providers[i].BaseURL = maskURLUserinfo(cp.Providers[i].BaseURL)
+		cp.Providers[i].BaseURL = maskURLSecrets(cp.Providers[i].BaseURL)
 	}
 	// MCP：命令行、环境变量、请求头、参数都可能带密钥——
 	// 只打 APIKey 会把远程 MCP 的 Bearer 原样漏出去。
@@ -149,7 +150,8 @@ func RedactedConfigJSON() string {
 		m.Headers = m.Redacted()
 		m.Args = redactArgs(m.Args)
 		m.Env = redactArgs(m.Env)
-		m.URL = maskURLUserinfo(m.URL)
+		m.Command = strings.Join(redactArgs([]string{m.Command}), "")
+		m.URL = maskURLSecrets(m.URL)
 	}
 	// Hooks：命令行里可能夹带 token/密钥，保守整串打码。
 	cp.Hooks = make([]Hook, len(c.Hooks))
@@ -161,7 +163,7 @@ func RedactedConfigJSON() string {
 	}
 	// 代理可能是 http://user:pass@host:port
 	if cp.ProxyURL != "" {
-		cp.ProxyURL = maskURLUserinfo(cp.ProxyURL)
+		cp.ProxyURL = maskURLSecrets(cp.ProxyURL)
 	}
 	data, err := json.MarshalIndent(cp, "", "  ")
 	if err != nil {
@@ -204,6 +206,29 @@ func maskURLUserinfo(u string) string {
 		return u
 	}
 	return u[:schemeEnd+3] + "***@" + rest[at+1:]
+}
+
+// maskURLSecrets 在 userinfo 之外，把 query 里疑似密钥的参数也打码。
+// 私有网关常用 ?api_key=... / ?token=...，只遮 userinfo 仍会进支持包。
+func maskURLSecrets(u string) string {
+	u = maskURLUserinfo(u)
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return u
+	}
+	q := parsed.Query()
+	changed := false
+	for k := range q {
+		if looksSecretValue(k) {
+			q.Set(k, "***")
+			changed = true
+		}
+	}
+	if !changed {
+		return u
+	}
+	parsed.RawQuery = q.Encode()
+	return parsed.String()
 }
 
 // looksSecretValue 判断命令行/字符串里是否疑似夹带密钥。
