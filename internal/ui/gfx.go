@@ -152,7 +152,22 @@ func Blend(a, b uint32, t float32) uint32 {
 // Alpha 把 fg 以 alpha 比例混到 bg 上。
 func Alpha(bg, fg uint32, alpha float32) uint32 { return Blend(bg, fg, alpha) }
 
+// quantizeGDI 把颜色压到每个通道 3 位（8 级）。
+// GDI 兼容渲染没有 alpha，呼吸点/脉冲/淡入每帧都会产生新颜色；
+// 若按原色缓存画刷/画笔，几分钟就能耗尽 Win7 的 GDI 句柄额度。
+// 量化后最多 512 种颜色，缓存有界，画质差异只在兼容模式可见。
+func quantizeGDI(color uint32) uint32 {
+	q := func(v uint32) uint32 {
+		if v >= 0xE0 {
+			return 0xFF // 保留纯白，避免 GDI 模式整体发灰
+		}
+		return v & 0xE0
+	}
+	return q(color&0xFF) | q((color>>8)&0xFF)<<8 | q((color>>16)&0xFF)<<16
+}
+
 func (c *Canvas) brush(color uint32) win32.HBRUSH {
+	color = quantizeGDI(color)
 	if b, ok := c.brushes[color]; ok {
 		return b
 	}
@@ -162,6 +177,7 @@ func (c *Canvas) brush(color uint32) win32.HBRUSH {
 }
 
 func (c *Canvas) pen(color uint32) win32.HPEN {
+	color = quantizeGDI(color)
 	if p, ok := c.pens[color]; ok {
 		return p
 	}
@@ -177,6 +193,7 @@ type penKey struct {
 
 // penW 按颜色和宽度缓存的粗笔（createPen 比每次创建快得多）
 func (c *Canvas) penW(color uint32, width int32) win32.HPEN {
+	color = quantizeGDI(color)
 	k := penKey{color, width}
 	if p, ok := c.pensW[k]; ok {
 		return p
