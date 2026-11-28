@@ -26,6 +26,14 @@ func init() {
 
 func runDiagnostics(ctx *Context, args map[string]interface{}) (Result, error) {
 	root := coreResolveDiagnostics(ctx, Get(args, "path"))
+	if err := core.ValidateWindowsPathSyntax(root); err != nil {
+		return Result{}, err
+	}
+	// diagnostics 会执行 go vet / cargo check，必须和 read_file 用同一条边界：
+	// 工作区外要用户确认，子代理/无人值守直接拒绝。
+	if err := guardRead(ctx, root, "诊断"); err != nil {
+		return Result{}, err
+	}
 	if err := guardSearchRoot(root); err != nil {
 		return Result{}, err
 	}

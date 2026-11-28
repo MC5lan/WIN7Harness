@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"win7harness/internal/core"
 	"win7harness/internal/lsp"
 )
 
@@ -37,6 +38,12 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 	if path == "" {
 		return Result{}, fmt.Errorf("path 不能为空")
 	}
+	if err := core.ValidateWindowsPathSyntax(path); err != nil {
+		return Result{}, err
+	}
+	if err := guardRead(ctx, path, "LSP"); err != nil {
+		return Result{}, err
+	}
 	st, err := os.Stat(path)
 	if err != nil || st.IsDir() {
 		return Result{}, fmt.Errorf("文件不存在：%s", path)
@@ -47,7 +54,11 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 		return Result{}, fmt.Errorf("没有找到 %s 对应的语言服务器。安装 gopls / pylsp / typescript-language-server / rust-analyzer 后可用；当前仍可用 diagnostics 工具做编译诊断", filepath.Ext(abs))
 	}
 	root := lspRoot(ctx.WorkDir, abs)
-	startCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	baseCtx := context.Background()
+	if ctx.Ctx != nil {
+		baseCtx = ctx.Ctx
+	}
+	startCtx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	defer cancel()
 	client, err := lsp.Start(startCtx, cmd, cmdArgs, root)
 	if err != nil {
@@ -68,7 +79,7 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 	}
 	switch action {
 	case "diagnostics", "":
-		ds := client.WaitDiagnostics(context.Background(), uri, 15*time.Second)
+		ds := client.WaitDiagnostics(baseCtx, uri, 15*time.Second)
 		if len(ds) == 0 {
 			return Result{Output: fmt.Sprintf("LSP 诊断：%s 没有发现问题。", filepath.Base(abs)), Display: true, Title: "LSP 诊断"}, nil
 		}
@@ -82,9 +93,9 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 	case "definition", "references":
 		var locs []lsp.Location
 		if action == "definition" {
-			locs, err = client.Definition(context.Background(), uri, line-1, col-1)
+			locs, err = client.Definition(baseCtx, uri, line-1, col-1)
 		} else {
-			locs, err = client.References(context.Background(), uri, line-1, col-1)
+			locs, err = client.References(baseCtx, uri, line-1, col-1)
 		}
 		if err != nil {
 			return Result{}, err
@@ -100,7 +111,7 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 		sort.Strings(out)
 		return Result{Output: "LSP " + action + "：\n" + strings.Join(out, "\n"), Display: true, Title: "LSP " + action}, nil
 	case "hover":
-		text, err := client.Hover(context.Background(), uri, line-1, col-1)
+		text, err := client.Hover(baseCtx, uri, line-1, col-1)
 		if err != nil {
 			return Result{}, err
 		}

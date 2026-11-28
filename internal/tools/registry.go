@@ -143,7 +143,6 @@ var planSafeTools = map[string]bool{
 	"glob":          true,
 	"grep":          true,
 	"repo_map":      true,
-	"diagnostics":   true,
 	"toolchain":     true,
 	"lsp":           true,
 	"code_search":   true,
