@@ -73,6 +73,11 @@ func (a *App) openUnlockModal(after func()) {
 			if err := core.UnlockPortableSecrets(pw); err != nil {
 				return err
 			}
+			// UnlockPortableSecrets 发布的是新的只读快照；UI 私有副本
+			// 必须同步，否则 rebuildEngine 仍拿不到解锁后的 Key。
+			if snap := core.Get(); snap != nil {
+				a.cfg = snap.Clone()
+			}
 			a.modal = nil
 			a.rebuildEngine()
 			if after != nil {
@@ -221,6 +226,11 @@ func (a *App) forgetPortablePassword() {
 		a.modal.PasswordErr = err.Error()
 		a.Redraw()
 		return
+	}
+	// ClearPortableSecrets 发布的是新的只读快照；同步 UI 私有副本，
+	// 否则下面的 Save 会把旧 Key 又加密写回去。
+	if snap := core.Get(); snap != nil {
+		a.cfg = snap.Clone()
 	}
 	// 把清空后的配置落盘，避免下次启动又读到旧密文。
 	_ = a.cfg.Save()

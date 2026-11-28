@@ -25,6 +25,12 @@ func (a *App) Timer() bool {
 	dt := now.Sub(a.lastTick)
 	a.lastTick = now
 	_ = dt
+	// 每秒发布一次配置快照：设置页/命令在 UI 线程改 a.cfg，工具 goroutine
+	// 通过 core.Get() 只读 current 的深拷贝，避免并发读写同一结构体。
+	if now.Sub(a.lastCfgPublish) >= time.Second {
+		a.lastCfgPublish = now
+		core.PublishConfig(a.cfg)
+	}
 
 	// 按需重绘：交互/流式/浮层保持 33fps；完全静止时降到 4fps。
 	// 输入事件本身会 Invalidate，不会牺牲按键的即时响应。

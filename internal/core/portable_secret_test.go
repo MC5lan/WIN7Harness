@@ -124,7 +124,10 @@ func TestPortableConfigEncryptsAndUnlocks(t *testing.T) {
 	if err := UnlockPortableSecrets("u盘密码-123456"); err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded.Providers[loaded.ActiveProvider].APIKey; got != "sk-portable-config-123" {
+	// UnlockPortableSecrets 用新的只读快照替换 current；UI 私有副本由
+	// 调用方（app）同步，这里验证发布出去的新快照。
+	snap := Get()
+	if got := snap.Providers[snap.ActiveProvider].APIKey; got != "sk-portable-config-123" {
 		t.Fatalf("解锁后 Key 不对：%q", got)
 	}
 }

@@ -91,7 +91,10 @@ type App struct {
 	ui *UI
 
 	cfg *core.Config
-	eng *agent.Engine
+	// lastCfgPublish 控制配置快照的发布频率：UI 线程每秒把 a.cfg 的
+	// 深拷贝发布到 core.current，工具 goroutine 只读快照，不再和设置页并发读写。
+	lastCfgPublish time.Time
+	eng            *agent.Engine
 	// runMode 是启动时算好的安装形态（标准 / 所有用户 / 便携），
 	// 设置页每帧直接读它，避免每帧探测 U 盘写权限。
 	runMode string
