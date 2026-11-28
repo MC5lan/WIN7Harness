@@ -64,7 +64,17 @@ def walk_res(pe):
 
 
 def main():
-    path = sys.argv[1]
+    args = sys.argv[1:]
+    if not args:
+        raise SystemExit('用法: python3 tools/verify_exe.py <exe> [--want-arch amd64|386]')
+    path = args[0]
+    want_arch = ''
+    if '--want-arch' in args:
+        i = args.index('--want-arch')
+        if i + 1 >= len(args):
+            raise SystemExit('--want-arch 缺少值（amd64 / 386）')
+        want_arch = args[i + 1].lower()
+
     pe = read_pe(path)
     d = pe['data']
     ok = True
@@ -74,6 +84,15 @@ def main():
     print('[i] %s' % path)
     print('[i] 架构=%s  格式=%s  节数=%d  体积=%.2f MB'
           % (arch, mode, len(pe['sections']), len(d) / 1048576.0))
+
+    if want_arch:
+        want_machine = {'386': 0x14C, 'x86': 0x14C, 'amd64': 0x8664, 'x64': 0x8664}.get(want_arch)
+        if want_machine is None:
+            print('[x] 未知架构参数：%s' % want_arch)
+            ok = False
+        elif pe['machine'] != want_machine:
+            print('[x] 架构不符：期望 %s，实际 %s' % (want_arch, arch))
+            ok = False
 
     names = [s[0] for s in pe['sections']]
     if '.rsrc' not in names:
@@ -144,9 +163,10 @@ def main():
         ver = max(cands, key=len).decode()
     if ver:
         print('[i] 构建 Go 版本: %s' % ver)
-        if ver.startswith('go1.21') or ver.startswith('go1.22') or \
-           ver.startswith('go1.23') or ver.startswith('go1.24'):
-            print('[x] Go %s 产物无法在 Win7 SP1 启动，必须用 Go 1.20.x' % ver)
+        # 任何非 1.20.x 的产物都不能作为 Win7 发布包（1.21+ 启动即失败，
+        # 1.25/1.26 等未来版本同样不能在旧系统启动）。
+        if not (ver == 'go1.20' or ver.startswith('go1.20.')):
+            print('[x] Go %s 产物无法保证在 Win7 SP1 启动，必须用 Go 1.20.x' % ver)
             ok = False
     else:
         print('[!] 未能从二进制中识别 Go 版本')

@@ -75,10 +75,10 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
 # ---------- 测试（可选） ----------
 if ($Test) {
-    Write-Host "[1/5] go test ./internal/core ./internal/app" -ForegroundColor Yellow
+    Write-Host "[1/5] go test ./... -count=1 -timeout 15m" -ForegroundColor Yellow
     Push-Location $root
     try {
-        & $Go test ./internal/core ./internal/app -count=1
+        & $Go test ./... -count=1 -timeout 15m
         if ($LASTEXITCODE -ne 0) { throw "测试失败，停止构建" }
     } finally {
         Pop-Location

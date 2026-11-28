@@ -29,6 +29,8 @@ jobs:
           cache: true
       - name: 依赖准入
         run: go run ./cmd/depguard
+      - name: 代码卫生门禁
+        run: python3 scripts/check.py
       - name: 编译全部包
         env:
           GOOS: windows
@@ -52,7 +54,7 @@ jobs:
           rm -f cmd/win7harness/rsrc.syso
           ls -lh dist/
       - name: PE 结构校验
-        run: python3 tools/verify_exe.py dist/WIN7Harness-${{ matrix.goarch }}.exe
+        run: python3 tools/verify_exe.py dist/WIN7Harness-${{ matrix.goarch }}.exe --want-arch ${{ matrix.goarch }}
       - uses: actions/upload-artifact@v4
         with:
           name: exe-${{ matrix.goarch }}
@@ -132,3 +134,10 @@ jobs:
       - name: 单测（Windows 全量）
         if: runner.os == 'Windows'
         run: go test ./... -count=1 -timeout 15m
+      - name: 单测（Windows 386 关键包）
+        # Win7 的 32 位用户仍占大头；386 的 Job Object 布局、MSAA、int 溢出
+        # 在 amd64 上测不出来。这里只跑关键包，成本约 1 分钟。
+        if: runner.os == 'Windows'
+        env:
+          GOARCH: "386"
+        run: go test ./internal/core/... ./internal/tools/... ./internal/agent/... ./internal/app/... ./internal/selftest/... ./internal/win32/... ./internal/ui/... -count=1 -timeout 15m
