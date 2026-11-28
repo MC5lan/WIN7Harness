@@ -166,11 +166,16 @@ func (c *Client) readLoop() {
 }
 
 func (c *Client) readFrame() ([]byte, error) {
+	const maxFrameBytes = 16 << 20
+	const maxHeaderLine = 8 << 10
 	length := -1
 	for {
 		line, err := c.out.ReadString('\n')
 		if err != nil {
 			return nil, err
+		}
+		if len(line) > maxHeaderLine {
+			return nil, fmt.Errorf("LSP 头部行过长（%d 字节），已中止", len(line))
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
@@ -183,6 +188,9 @@ func (c *Client) readFrame() ([]byte, error) {
 	}
 	if length < 0 {
 		return nil, fmt.Errorf("缺少 Content-Length")
+	}
+	if length > maxFrameBytes {
+		return nil, fmt.Errorf("LSP 帧过大（%d 字节，上限 %d），已中止", length, maxFrameBytes)
 	}
 	buf := make([]byte, length)
 	_, err := io.ReadFull(c.out, buf)

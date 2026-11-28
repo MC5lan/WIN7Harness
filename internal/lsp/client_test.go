@@ -1,6 +1,7 @@
 package lsp
 
 import (
+	"bufio"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -47,5 +48,20 @@ func TestUnmarshalRPCResponse(t *testing.T) {
 	}
 	if len(msg.Result) == 0 || !strings.Contains(string(msg.Result), "ok") {
 		t.Fatalf("result 未解析: %s", msg.Result)
+	}
+}
+
+// 恶意/损坏的语言服务器用超大 Content-Length 可以让 32 位进程直接 OOM。
+func TestReadFrameRejectsOversize(t *testing.T) {
+	c := &Client{out: bufio.NewReader(strings.NewReader("Content-Length: 999999999\r\n\r\n"))}
+	if _, err := c.readFrame(); err == nil {
+		t.Fatal("超大帧应被拒绝")
+	}
+}
+
+func TestReadFrameRejectsLongHeader(t *testing.T) {
+	c := &Client{out: bufio.NewReader(strings.NewReader("X-Long: " + strings.Repeat("a", 9000) + "\r\n\r\n"))}
+	if _, err := c.readFrame(); err == nil {
+		t.Fatal("超长头部行应被拒绝")
 	}
 }
