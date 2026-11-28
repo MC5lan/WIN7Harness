@@ -189,6 +189,9 @@ func SessionIndex(dir string, limit int) ([]SessionBrief, error) {
 		switch {
 		case strings.HasSuffix(name, ".json.gz"):
 			id = strings.TrimSuffix(name, ".json.gz")
+		case strings.HasSuffix(name, ".json.bak"):
+			// 主文件损坏、只剩备份时，索引也要列出会话；读取器会自动回退 .bak。
+			id = strings.TrimSuffix(name, ".json.bak")
 		case strings.HasSuffix(name, ".json"):
 			id = strings.TrimSuffix(name, ".json")
 		default:
@@ -216,11 +219,28 @@ func SessionIndex(dir string, limit int) ([]SessionBrief, error) {
 		keep = len(cands)
 	}
 	sort.Slice(cands, func(i, j int) bool { return cands[i].mtime.After(cands[j].mtime) })
+	// 同一会话可能同时存在 .json/.json.bak/.json.gz，按 mtime 保留最新一份，
+	// 避免会话中心出现重复条目。
+	if len(cands) > 1 {
+		seen := make(map[string]bool, len(cands))
+		uniq := cands[:0]
+		for _, cd := range cands {
+			if seen[cd.id] {
+				continue
+			}
+			seen[cd.id] = true
+			uniq = append(uniq, cd)
+		}
+		cands = uniq
+	}
 	allIDs := make(map[string]bool, len(cands))
 	for _, cd := range cands {
 		allIDs[cd.id] = true
 	}
-	if keep > 0 {
+	// 注意 keep 是按去重前的数量算的；dedup 后长度可能变小，
+	// 这里必须判断 keep < len(cands)，否则 cands[:keep] 会把底层数组里的
+	// 重复项重新扩出来（长度在 capacity 内不会被 panic）。
+	if keep > 0 && keep < len(cands) {
 		cands = cands[:keep]
 	}
 

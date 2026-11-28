@@ -196,3 +196,45 @@ func TestSessionIndexGzipFixture(t *testing.T) {
 		t.Fatalf("gzip SessionLines 错误：total=%d lines=%+v", total, lines)
 	}
 }
+
+func TestSessionIndexListsBakOnlySession(t *testing.T) {
+	dir := t.TempDir()
+	p := writeSessionFixture(t, dir, "cccc000000000003", "只剩备份", "2026-11-18T09:00:00+08:00", []map[string]interface{}{
+		msg("user", "备份里的消息", "2026-11-18T09:00:00+08:00"),
+	})
+	if err := os.Rename(p, p+".bak"); err != nil {
+		t.Fatal(err)
+	}
+	briefs, err := SessionIndex(dir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(briefs) != 1 {
+		t.Fatalf("只剩 .json.bak 的会话应列出且只列一次，实际 %d 条", len(briefs))
+	}
+	if briefs[0].ID != "cccc000000000003" || briefs[0].Title != "只剩备份" {
+		t.Fatalf("备份会话摘要异常：%+v", briefs[0])
+	}
+}
+
+func TestSessionIndexDeduplicatesCopies(t *testing.T) {
+	dir := t.TempDir()
+	p := writeSessionFixture(t, dir, "dddd000000000004", "主文件", "2026-11-19T09:00:00+08:00", []map[string]interface{}{
+		msg("user", "主文件消息", "2026-11-19T09:00:00+08:00"),
+	})
+	if err := os.WriteFile(p+".bak", []byte("backup"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	briefs, err := SessionIndex(dir, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(briefs) != 1 {
+		ents, _ := os.ReadDir(dir)
+		var names []string
+		for _, e := range ents {
+			names = append(names, e.Name())
+		}
+		t.Fatalf(".json 与 .json.bak 同时存在时应去重，实际 %d 条：%+v files=%v", len(briefs), briefs, names)
+	}
+}
