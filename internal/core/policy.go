@@ -123,6 +123,14 @@ func (p *Policy) Decide(tool, target string, write bool, danger RiskLevel, workD
 	if allowed {
 		return PermDecision{Kind: "allow", Reason: "命中放行规则 " + allowRule}
 	}
+	// auto 模式只自动放行 Safe。Caution（解释器、del/copy/move、计划任务等）
+	// 仍必须确认：命令文本是用户/模型控制的，不能因为“看起来不致命”就静默执行。
+	if danger == RiskCaution {
+		if p.Mode == PermPlan {
+			return PermDecision{Kind: "deny", Reason: "计划模式（只读）下禁止执行中危命令"}
+		}
+		return PermDecision{Kind: "ask", Reason: "中危命令需确认（auto 模式不自动放行解释器/删除/复制类命令）"}
+	}
 	if rule, ok := matchRules(p.Ask, tool, target); ok {
 		return PermDecision{Kind: "ask", Reason: "命中询问规则 " + rule}
 	}

@@ -209,6 +209,11 @@ func CommandRisk(cmd string) RiskLevel {
 	if destructiveBySwitches(low) {
 		return RiskDanger
 	}
+	// cmd.exe 的变量/转义/延迟展开会把静态文本变成另一条命令。
+	// 无法安全求值时至少抬到 Caution，让 auto 模式也弹确认。
+	if shellExpansionRisk(low) {
+		return RiskCaution
+	}
 	if cautionByCommand(low) {
 		return RiskCaution
 	}
@@ -218,13 +223,29 @@ func CommandRisk(cmd string) RiskLevel {
 			return RiskCaution
 		}
 	}
-	// 写操作类命令
-	for _, p := range []string{"del ", "copy ", "move ", "ren ", "mkdir", "echo >", ">", "git push", "npm install", "go build"} {
+	// 写操作类命令。go build 只产出构建缓存/目标文件，不删改源码，
+	// 保持在 Safe，避免 auto 模式下每次构建都弹窗；go test 由 run_tests 工具负责。
+	for _, p := range []string{"del ", "copy ", "move ", "ren ", "mkdir", "echo >", ">", "git push", "npm install", "reg add", "start "} {
 		if strings.Contains(low, p) {
 			return RiskCaution
 		}
 	}
 	return RiskSafe
+}
+
+// shellExpansionRisk 识别 cmd.exe 会二次解释的写法。
+// 这里不求精确求值，只判断“命令文本不能再按字面理解”，交给用户确认。
+func shellExpansionRisk(low string) bool {
+	if strings.ContainsAny(low, "%!^") {
+		return true
+	}
+	// 按词判断，避免把 "reset " 里的 "set " 误判成 set 命令。
+	for _, w := range strings.Fields(low) {
+		if w == "for" || w == "set" || w == "call" {
+			return true
+		}
+	}
+	return strings.Contains(low, "cmd /v")
 }
 
 // LooksLikeWrite 判断工具名是否属于写类操作（用于 UI 展示"写入"标记）。
@@ -356,13 +377,20 @@ func cautionByCommand(low string) bool {
 // gitDiscardsWork 判断 git 子命令是否会丢弃未提交的改动或删除未跟踪文件，
 // 这类操作没有 git 层面的撤销手段。args 是 git 之后的参数（已小写）。
 func gitDiscardsWork(args []string) bool {
-	// 跳过全局选项：-c k=v、-C <dir>（normalizeCmd 已统一小写，二者都带一个值）、--no-pager 等。
+	// 跳过全局选项：-c k=v、-C <dir>、--git-dir <dir>、--work-tree <dir> 等。
+	// normalizeCmd 已统一小写，所以 -C 也会变成 -c；两者都带一个值。
 	i := 0
-	for i < len(args) && strings.HasPrefix(args[i], "-") {
-		if args[i] == "-c" {
+	for i < len(args) {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			break
+		}
+		switch a {
+		case "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env":
+			i += 2
+		default:
 			i++
 		}
-		i++
 	}
 	if i >= len(args) {
 		return false
@@ -380,6 +408,9 @@ func gitDiscardsWork(args []string) bool {
 	case "restore":
 		// 只有 --staged 而没有 --worktree 时只动暂存区，不丢改动。
 		return len(rest) > 0 && !(hasArg(rest, "--staged") && !hasArg(rest, "--worktree"))
+	case "rm":
+		// git rm 会删除工作区文件；--cached 只动索引，不碰工作区。
+		return !hasArg(rest, "--cached")
 	case "stash":
 		return len(rest) > 0 && (rest[0] == "clear" || rest[0] == "drop")
 	}
