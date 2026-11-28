@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"win7harness/internal/core"
 	"win7harness/internal/coreutil"
+	"win7harness/internal/llm"
 	"win7harness/internal/tools"
 )
 
@@ -195,16 +197,24 @@ func (a *App) cmdNetDiag(rest string) {
 	if !strings.HasPrefix(target, "http://") && !strings.HasPrefix(target, "https://") {
 		target = "https://" + target
 	}
-	proxyDesc := "系统/环境变量"
+	// Diagnose 要的是真实代理 URL，不是“系统/环境变量”这种描述。
+	// 之前把描述传进去，url.Parse 得到空 host，默认模式必然误报 HTTPS 失败。
+	proxyURL := ""
 	if a.cfg != nil {
 		switch strings.ToLower(strings.TrimSpace(a.cfg.ProxyMode)) {
 		case "direct", "off", "none":
-			proxyDesc = "直连（已关闭代理）"
+			proxyURL = ""
 		case "manual":
-			proxyDesc = "手动 " + a.cfg.ProxyURL
+			proxyURL = strings.TrimSpace(a.cfg.ProxyURL)
+		default:
+			if u, err := url.Parse(target); err == nil {
+				if pu, err := llm.ResolveProxyForURL(u); err == nil && pu != nil {
+					proxyURL = pu.String()
+				}
+			}
 		}
 	}
-	res := core.Diagnose(target, proxyDesc, 15*time.Second)
+	res := core.Diagnose(target, proxyURL, 15*time.Second)
 	a.sysNote(res.String())
 	core.Logf("netdiag %s: %s", target, res.Verdict)
 }
