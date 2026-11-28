@@ -16,7 +16,7 @@
 
 **A local AI coding agent that runs on Windows 7 SP1.** Pure Go, single EXE, no runtime dependencies. The UI is drawn with Win32 GDI / Canvas — no WebView2, .NET, Electron, or browser runtime.
 
-> This repository is the **v2.0.1** snapshot. Chinese (`README.md`) is the primary documentation language; this English file is a convenience translation. Licensed under [Apache 2.0](LICENSE).
+> This repository is the **v2.0.2** snapshot. Chinese (`README.md`) is the primary documentation language; this English file is a convenience translation. Licensed under [Apache 2.0](LICENSE).
 
 ## Screenshots
 
