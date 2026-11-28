@@ -11,6 +11,7 @@ import (
 	"win7harness/internal/llm"
 	"win7harness/internal/mcp"
 	"win7harness/internal/netbridge"
+	"win7harness/internal/tools"
 	"win7harness/internal/win32"
 )
 
@@ -145,6 +146,7 @@ func (a *App) Shutdown() {
 		_ = a.cfg.Save()
 	}
 	mcp.Shutdown()
+	tools.ShutdownLSP()
 	core.MarkCleanExit(0)
 	core.Logf("lifecycle: end-session 已停止生成并落盘")
 }

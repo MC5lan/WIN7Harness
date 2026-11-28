@@ -8,11 +8,97 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"win7harness/internal/core"
 	"win7harness/internal/lsp"
 )
+
+const (
+	lspMaxClients  = 4
+	lspIdleTimeout = 10 * time.Minute
+)
+
+type lspEntry struct {
+	client *lsp.Client
+	last   time.Time
+	busy   sync.Mutex
+}
+
+var (
+	lspPoolMu sync.Mutex
+	lspPool   = map[string]*lspEntry{}
+)
+
+func lspPoolKey(root, cmd string, args []string) string {
+	return root + "\x00" + cmd + "\x00" + strings.Join(args, "\x00")
+}
+
+// getLSPClient 按 root + 命令复用语言服务器；同一 root 的请求串行执行。
+func getLSPClient(ctx context.Context, cmd string, args []string, root string) (string, *lspEntry, error) {
+	key := lspPoolKey(root, cmd, args)
+	now := time.Now()
+
+	lspPoolMu.Lock()
+	defer lspPoolMu.Unlock()
+	for k, e := range lspPool {
+		if now.Sub(e.last) > lspIdleTimeout {
+			delete(lspPool, k)
+			go e.client.Close()
+		}
+	}
+	if e, ok := lspPool[key]; ok {
+		e.last = now
+		return key, e, nil
+	}
+	if len(lspPool) >= lspMaxClients {
+		var oldestKey string
+		var oldest *lspEntry
+		for k, e := range lspPool {
+			if oldest == nil || e.last.Before(oldest.last) {
+				oldestKey, oldest = k, e
+			}
+		}
+		if oldest != nil {
+			delete(lspPool, oldestKey)
+			go oldest.client.Close()
+		}
+	}
+	client, err := lsp.Start(ctx, cmd, args, root)
+	if err != nil {
+		return "", nil, err
+	}
+	e := &lspEntry{client: client, last: time.Now()}
+	lspPool[key] = e
+	return key, e, nil
+}
+
+func dropLSPClient(key string, e *lspEntry) {
+	lspPoolMu.Lock()
+	if cur, ok := lspPool[key]; ok && cur == e {
+		delete(lspPool, key)
+	}
+	lspPoolMu.Unlock()
+	go e.client.Close()
+}
+
+func touchLSPClient(e *lspEntry) {
+	lspPoolMu.Lock()
+	e.last = time.Now()
+	lspPoolMu.Unlock()
+}
+
+// ShutdownLSP 关闭所有缓存的语言服务器；应用退出时调用。
+func ShutdownLSP() {
+	lspPoolMu.Lock()
+	entries := lspPool
+	lspPool = map[string]*lspEntry{}
+	lspPoolMu.Unlock()
+	for _, e := range entries {
+		e.client.Close()
+	}
+}
 
 func init() {
 	register(Tool{
@@ -60,14 +146,21 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 	}
 	startCtx, cancel := context.WithTimeout(baseCtx, 30*time.Second)
 	defer cancel()
-	client, err := lsp.Start(startCtx, cmd, cmdArgs, root)
+	key, entry, err := getLSPClient(startCtx, cmd, cmdArgs, root)
 	if err != nil {
 		return Result{}, err
 	}
-	defer client.Close()
+	entry.busy.Lock()
+	defer entry.busy.Unlock()
+	defer touchLSPClient(entry)
+	client := entry.client
+	fail := func(err error) (Result, error) {
+		dropLSPClient(key, entry)
+		return Result{}, err
+	}
 	uri, err := client.DidOpen(abs)
 	if err != nil {
-		return Result{}, err
+		return fail(err)
 	}
 	line := GetInt(args, "line", 1)
 	col := GetInt(args, "column", 1)
@@ -98,7 +191,7 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 			locs, err = client.References(baseCtx, uri, line-1, col-1)
 		}
 		if err != nil {
-			return Result{}, err
+			return fail(err)
 		}
 		if len(locs) == 0 {
 			return Result{Output: fmt.Sprintf("LSP %s：没有结果。", action), Display: true, Title: "LSP"}, nil
@@ -113,7 +206,7 @@ func runLSP(ctx *Context, args map[string]interface{}) (Result, error) {
 	case "hover":
 		text, err := client.Hover(baseCtx, uri, line-1, col-1)
 		if err != nil {
-			return Result{}, err
+			return fail(err)
 		}
 		if strings.TrimSpace(text) == "" {
 			return Result{Output: "LSP hover：没有结果。", Display: true, Title: "LSP hover"}, nil

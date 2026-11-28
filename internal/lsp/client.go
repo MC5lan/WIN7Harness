@@ -73,6 +73,11 @@ type Client struct {
 	diags    map[string][]Diagnostic
 	diagSeen map[string]bool
 
+	// open 记录已 didOpen 的 URI 与版本：客户端复用后再次打开同一文件
+	// 必须发 didChange，重复 didOpen 会被语言服务器忽略或报错。
+	openMu sync.Mutex
+	open   map[string]int
+
 	done chan struct{}
 }
 
@@ -272,6 +277,8 @@ func diagKey(uri string) string {
 }
 
 // DidOpen 把文件内容同步给语言服务器。
+// 客户端复用时，同一文件第二次及以后发 didChange（全量替换），
+// 并清掉旧诊断，WaitDiagnostics 才会等这一版的新结果。
 func (c *Client) DidOpen(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -279,11 +286,34 @@ func (c *Client) DidOpen(path string) (string, error) {
 	}
 	uri := PathToURI(path)
 	lang := languageID(path)
+
+	c.openMu.Lock()
+	defer c.openMu.Unlock()
+	if c.open == nil {
+		c.open = map[string]int{}
+	}
+	if v, ok := c.open[uri]; ok {
+		c.diagMu.Lock()
+		delete(c.diagSeen, diagKey(uri))
+		delete(c.diags, diagKey(uri))
+		c.diagMu.Unlock()
+		c.open[uri] = v + 1
+		err = c.notify("textDocument/didChange", map[string]interface{}{
+			"textDocument": map[string]interface{}{"uri": uri, "version": v + 1},
+			"contentChanges": []map[string]interface{}{
+				{"text": string(data)},
+			},
+		})
+		return uri, err
+	}
 	err = c.notify("textDocument/didOpen", map[string]interface{}{
 		"textDocument": map[string]interface{}{
 			"uri": uri, "languageId": lang, "version": 1, "text": string(data),
 		},
 	})
+	if err == nil {
+		c.open[uri] = 1
+	}
 	return uri, err
 }
 
@@ -381,7 +411,7 @@ func renderHover(v interface{}) string {
 
 // Close 结束语言服务器及其子进程。
 //
-// 这是一次性调用（每次工具调用新起一个 server），不需要保留索引状态；
+// 客户端会被缓存复用；这里只在缓存淘汰/应用退出时调用。
 // 先直接杀进程树，避免 gopls 退出后它拉起的 go list 变成孤儿占住临时目录。
 func (c *Client) Close() {
 	// 先杀树再关 stdin：反过来 gopls 会先退出，它拉起的 go list 会变成孤儿。
