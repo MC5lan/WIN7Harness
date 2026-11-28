@@ -49,6 +49,23 @@ func TestExpandAtRefs(t *testing.T) {
 		t.Fatalf("不应展开越界/不存在路径: %q", bad)
 	}
 
+	// 绝对路径不能绕过 read_file 的工作区边界。
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got = ExpandAtRefs("读取 @"+secret, root)
+	if strings.Contains(got, "TOP-SECRET") || strings.Contains(got, "<file") {
+		t.Fatalf("绝对路径不应被 @ 引用展开: %q", got)
+	}
+
+	// UNC 在 Windows 上会在 Stat 前访问网络；必须在解析前拒绝。
+	got = ExpandAtRefs(`读取 @\\server\share\secret.txt`, root)
+	if strings.Contains(got, "<file") {
+		t.Fatalf("UNC 路径不应被 @ 引用展开: %q", got)
+	}
+
 	// 无 @ 时原样返回
 	if ExpandAtRefs("普通问题", root) != "普通问题" {
 		t.Fatal("无 @ 时应原样返回")

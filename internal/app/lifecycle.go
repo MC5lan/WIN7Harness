@@ -141,7 +141,7 @@ func (a *App) Shutdown() {
 			core.Logf("WM_ENDSESSION：会话队列 2 秒内未写完，系统将终止进程")
 		}
 	}
-	if a.cfg != nil {
+	if a.cfg != nil && !core.ConfigReadOnly() {
 		_ = a.cfg.Save()
 	}
 	mcp.Shutdown()

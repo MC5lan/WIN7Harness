@@ -40,7 +40,11 @@ type Provider struct {
 	APIKey string `json:"api_key,omitempty"`
 	// APIKeyEnc 是 DPAPI 加密后的 Key（dpapi:v1:base64）；拷贝到
 	// 其他 Windows 用户/机器上无法解密，加载时会提示重新填写。
-	APIKeyEnc string   `json:"api_key_enc,omitempty"`
+	APIKeyEnc string `json:"api_key_enc,omitempty"`
+	// KeyLoaded 表示本次启动是否成功把 APIKeyEnc 解成了 APIKey。
+	// 用于区分“用户显式清空 Key”和“密文暂时解不开”：前者应删除密文，
+	// 后者必须保留密文，避免一次解密失败就把可恢复的 Key 永久抹掉。
+	KeyLoaded bool     `json:"-"`
 	Model     string   `json:"model"`
 	Models    []string `json:"models,omitempty"`
 	Local     bool     `json:"local,omitempty"`
@@ -256,6 +260,10 @@ var (
 	cfgMu   sync.RWMutex
 	current *Config
 
+	// configReadOnly 表示本次启动读取 config.json 失败（锁/ACL/网络盘/空文件）。
+	// 此时内存里是默认配置，绝不能自动保存，否则会用默认值覆盖用户原配置。
+	configReadOnly bool
+
 	// 便携模式的解锁状态，和配置一起由 cfgMu 保护。
 	// portablePassword 只在内存里；程序退出即消失。
 	portablePassword string
@@ -459,6 +467,14 @@ func ConfigLoadError() string {
 	return lastConfigErr
 }
 
+// ConfigReadOnly 表示本次启动的配置读取失败，内存里是默认值。
+// 此时任何保存都可能覆盖用户原配置，调用方必须跳过自动保存。
+func ConfigReadOnly() bool {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	return configReadOnly
+}
+
 // TakeConfigLoadError 读走并清空异常说明（界面播报一次即可）。
 func TakeConfigLoadError() string {
 	cfgMu.Lock()
@@ -472,8 +488,10 @@ func Load() *Config {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
 	c := DefaultConfig()
+	configReadOnly = false
 	data, err := os.ReadFile(ConfigPath())
 	if err == nil && len(data) > 0 {
+		configReadOnly = false
 		// Win7 记事本另存为 UTF-8 会带 BOM；JSON 解析器不认。
 		// 不剥掉就会把整份配置判成"损坏"并回退默认，用户 Key/模型全丢。
 		data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
@@ -504,9 +522,19 @@ func Load() *Config {
 			if bak, qerr := Quarantine(ConfigPath()); qerr == nil {
 				lastConfigErr = "配置文件损坏，已备份为 " + filepath.Base(bak) + "，本次按默认配置启动"
 			} else {
-				lastConfigErr = "配置文件损坏且无法备份：" + terr.Error()
+				configReadOnly = true
+				lastConfigErr = "配置文件损坏且无法备份：" + terr.Error() + "；本次禁止自动保存"
 			}
 		}
+	} else if err != nil && !os.IsNotExist(err) {
+		// 瞬时锁文件、ACL 拒绝、漫游目录不可达：不能当成“没有配置”。
+		// 否则关闭程序时默认配置会把用户原文件覆盖掉。
+		configReadOnly = true
+		lastConfigErr = "配置文件读取失败（" + err.Error() + "），本次按默认配置启动并禁止自动保存；请修复文件/关闭占用后重启"
+	} else if err == nil {
+		// 0 字节文件通常是写盘中断/杀软清空，不能静默当新装。
+		configReadOnly = true
+		lastConfigErr = "配置文件为空（0 字节），本次按默认配置启动并禁止自动保存；请检查 " + ConfigPath()
 	}
 	c.loadProviderKeys()
 	c.Version = Version
@@ -690,6 +718,9 @@ func (c *Config) Normalize() {
 func (c *Config) Save() error {
 	cfgMu.Lock()
 	defer cfgMu.Unlock()
+	if configReadOnly {
+		return errors.New("配置读取失败或为空，已禁止保存；请修复/关闭占用后重启，避免默认配置覆盖原文件")
+	}
 	return c.saveLocked()
 }
 
@@ -726,10 +757,15 @@ func (c *Config) decryptProviderKeys() {
 		if err != nil {
 			Logf("config: provider %s 的 API Key 无法解密：%v", p.ID, err)
 			SetStartupWarning("配置中的 API Key 无法解密（可能来自其他 Windows 用户/机器），请在设置里重新填写")
-			p.APIKeyEnc = ""
+			// 保留密文：用户可能在原机器/原用户下还能恢复；下次保存不能把它抹掉。
+			p.KeyLoaded = false
 			continue
 		}
 		p.APIKey = key
+		p.KeyLoaded = true
+		// 明文已在内存，落盘时会重新加密；清掉旧密文可让“用户清空 Key”
+		// 在 forDisk 里被正确识别为删除，而不是继续保留旧密文。
+		p.APIKeyEnc = ""
 	}
 }
 
