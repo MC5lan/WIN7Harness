@@ -6,6 +6,19 @@
 > `docs/使用说明.txt` 整理；v1.33.0 之后主要依据使用说明的版本章节归纳。
 > 没有对应文档的版本（v1.12.0–v1.15.0、v1.18.0）不臆造内容，只标注缺口。
 
+## [2.0.3] - 2026-11-28
+- **安全**：auto 模式只自动放行 Safe；`del/copy/powershell/schtasks` 等 Caution 命令恢复逐次确认。补齐 cmd.exe `%`/`!`/`^`/`for`/`set`/`call` 与 git 全局选项的绕过识别。
+- **安全**：自动验证与 `run_tests` 参数做 shell 引用，堵住 `&`/`|` 命令注入；`@` 引用拒绝绝对路径/UNC；所有文件工具访问 UNC 前必须确认。
+- **安全**：正式构建的 GitHub 更新模式强制校验 `latest.json` 的 Ed25519 签名；Release 缺私钥时拒绝生成未签名清单。
+- **安全**：MCP 子进程改用环境变量白名单，stdio 单行上限 8MB，调用支持 ctx 取消；diagnostics/LSP 复用工作区读边界。
+- **稳定**：`finish_reason=length` 丢弃截断工具调用；主 Agent 默认 120 轮上限；后台任务默认 20 分钟；LSP 帧 16MB/头部 8KB 上限。
+- **稳定**：GDI 兼容渲染画刷/画笔颜色量化，避免耗尽句柄；输入 20 万字符上限；图片缓存改 96MB 字节预算。
+- **数据**：配置读取失败/0 字节进入只读保护；API Key 清空/解密失败状态修复；会话索引识别 `.json.bak` 并去重；`apply_patch` 拒绝同文件重复段。
+- **更新**：最新 `.old` 回滚副本无条件保留；诊断包 URL/MCP 命令脱敏；`/netdiag` 使用真实代理 URL。
+- **体验**：主按钮/发送按钮/设置页签按对比度选前景色；失焦时取消 IME 组字；设置页说明“0=默认120”。
+- **测试/CI**：Windows 386 关键包单测；CI/Release 接入 `scripts/check.py`；`verify_exe.py` 校验架构并拒绝非 go1.20.x 产物；自检用例数下限提到 70。
+- **行为变化**：默认 auto 模式下 Caution 命令会弹确认；需要免打扰的命令请显式加 allow 规则。
+
 ## [2.0.2] - 2026-11-28
 - 修复非 Windows 环境下 `internal/tools` 测试因引用已删除的 `withHookEnv` 无法编译的问题；新增 `hookEnv` 统一构造钩子环境变量。
 - CI 的 Linux 任务增加 `internal/tools` 测试编译检查，防止同类问题再次漏检。
