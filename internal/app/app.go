@@ -424,6 +424,10 @@ func (a *App) pageDefaultAction() {
 	}
 }
 
+// maxInputRunes 是输入框硬上限。32 位进程里 100 万字符粘贴 + 50 层撤销
+// 会占用数百 MB；20 万字符足够放大型报错/日志，又不会把地址空间打爆。
+const maxInputRunes = 200_000
+
 func (a *App) insertInput(s string) {
 	a.pushInputUndo()
 	if lo, hi := a.selRange(); lo >= 0 {
@@ -432,6 +436,15 @@ func (a *App) insertInput(s string) {
 		a.inputSel = -1
 	}
 	rs := []rune(s)
+	room := maxInputRunes - len(a.input)
+	if room < 0 {
+		room = 0
+	}
+	truncated := false
+	if len(rs) > room {
+		rs = rs[:room]
+		truncated = true
+	}
 	out := make([]rune, 0, len(a.input)+len(rs))
 	out = append(out, a.input[:a.inputCur]...)
 	out = append(out, rs...)
@@ -439,6 +452,9 @@ func (a *App) insertInput(s string) {
 	a.input = out
 	a.inputCur += len(rs)
 	a.refreshComplete()
+	if truncated {
+		a.toast("输入内容过长，已截断到 20 万字符", true)
+	}
 }
 
 // CaretPos 供 ui.CaretApp 使用：把输入法组字窗口定位到当前光标。

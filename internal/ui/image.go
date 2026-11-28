@@ -21,9 +21,14 @@ var (
 
 // ImageCache 缓存已转成 BGRA 的图片，避免每帧重复转换（滚动时帧率高）。
 type ImageCache struct {
-	mu sync.Mutex
-	m  map[string]*DibImage
+	mu        sync.Mutex
+	m         map[string]*DibImage
+	bytesUsed int64
 }
+
+// maxImageCacheBytes 是图片缓存的字节预算。64 条 * 每张 10~20MB 会到 1GB+，
+// 32 位 Win7 很容易 OOM；按字节淘汰比按条数更接近真实占用。
+const maxImageCacheBytes = 96 << 20
 
 // DibImage 是已转成 BGRA 32bpp 的位图，可直接贴到画布。
 type DibImage struct {
@@ -82,11 +87,24 @@ func (ic *ImageCache) Get(key string, loader func() (image.Image, error)) *DibIm
 		return nil
 	}
 	d := toDIB(img)
-	ic.mu.Lock()
-	if len(ic.m) > 64 { // 简易上限，防止一直增长
-		ic.m = map[string]*DibImage{}
+	var sz int64
+	if d != nil {
+		sz = int64(len(d.bits) + len(d.info))
 	}
-	ic.m[key] = d
+	ic.mu.Lock()
+	if d != nil {
+		// 单张就超过总预算时不缓存，但本次仍返回；否则先清空再放入。
+		if sz > maxImageCacheBytes {
+			ic.mu.Unlock()
+			return d
+		}
+		if ic.bytesUsed+sz > maxImageCacheBytes || len(ic.m) >= 64 {
+			ic.m = map[string]*DibImage{}
+			ic.bytesUsed = 0
+		}
+		ic.m[key] = d
+		ic.bytesUsed += sz
+	}
 	ic.mu.Unlock()
 	return d
 }
@@ -95,6 +113,7 @@ func (ic *ImageCache) Get(key string, loader func() (image.Image, error)) *DibIm
 func (ic *ImageCache) Clear() {
 	ic.mu.Lock()
 	ic.m = map[string]*DibImage{}
+	ic.bytesUsed = 0
 	ic.mu.Unlock()
 }
 
