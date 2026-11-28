@@ -16,12 +16,14 @@ var (
 	pImmReleaseContext       = dImm32.NewProc("ImmReleaseContext")
 	pImmSetCompositionWindow = dImm32.NewProc("ImmSetCompositionWindow")
 	pImmSetCandidateWindow   = dImm32.NewProc("ImmSetCandidateWindow")
+	pImmNotifyIME            = dImm32.NewProc("ImmNotifyIME")
 )
 
 const (
 	CFS_POINT          = 0x0002
 	CFS_FORCE_POSITION = 0x0020
 	CFS_CANDIDATEPOS   = 0x0040
+	CPS_CANCEL         = 0x0004
 )
 
 // COMPOSITIONFORM 组字窗口位置。字段顺序必须与 Win32 头文件一致。
@@ -63,5 +65,17 @@ func SetCompositionPos(h HWND, x, y int32) {
 	cf.PtCurrentPos.X = x
 	cf.PtCurrentPos.Y = y
 	_, _, _ = pcall(pImmSetCompositionWindow, himc, uintptr(unsafe.Pointer(&cf)))
+	_, _, _ = pcall(pImmReleaseContext, uintptr(h), himc)
+}
+
+// CancelComposition 在窗口失焦/停用时取消输入法组字。
+// 不取消时，WM_IME_ENDCOMPOSITION 可能永远不到，窗口会卡在 composing=true，
+// 后续键盘输入全部被交给 DefWindowProc，表现为“输入框活着但打不了字”。
+func CancelComposition(h HWND) {
+	himc, _, _ := pcall(pImmGetContext, uintptr(h))
+	if himc == 0 {
+		return
+	}
+	_, _, _ = pcall(pImmNotifyIME, himc, CPS_CANCEL, 0, 0)
 	_, _, _ = pcall(pImmReleaseContext, uintptr(h), himc)
 }
