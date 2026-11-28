@@ -389,9 +389,16 @@ func parsePatch(body string) ([]filePatch, error) {
 		}
 		hunk = nil
 	}
+	var dupErr error
 	flushFile := func() {
 		flushHunk()
 		if cur != nil && len(cur.hunks) > 0 {
+			for _, existing := range out {
+				if strings.EqualFold(filepath.Clean(existing.path), filepath.Clean(cur.path)) {
+					dupErr = fmt.Errorf("同一补丁里重复修改 %s：请合并成一个 *** Update File 段，或拆成多次 apply_patch", cur.path)
+					return
+				}
+			}
 			out = append(out, *cur)
 		}
 		cur = nil
@@ -449,6 +456,9 @@ func parsePatch(body string) ([]filePatch, error) {
 		}
 	}
 	flushFile()
+	if dupErr != nil {
+		return nil, dupErr
+	}
 	return out, nil
 }
 

@@ -152,3 +152,15 @@ func TestRunApplyPatchRejectsExistingAdd(t *testing.T) {
 		t.Fatalf("应拒绝覆盖已存在文件，实际: %v", err)
 	}
 }
+
+// 同一补丁里对同一文件写两个 Update 段时，后段会覆盖前段的改动；
+// 必须在解析阶段拒绝，而不是静默丢一半。
+func TestParsePatchRejectsDuplicateFile(t *testing.T) {
+	body := "*** Begin Patch\n" +
+		"*** Update File: a.txt\n@@\n-one\n+ONE\n" +
+		"*** Update File: a.txt\n@@\n-two\n+TWO\n" +
+		"*** End Patch"
+	if _, err := parsePatch(body); err == nil {
+		t.Fatal("同一文件重复 Update 应被拒绝")
+	}
+}
