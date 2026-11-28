@@ -642,7 +642,7 @@ func (a *App) settingsBudgetTab(p *settingsPane) {
 	c.TextFace(ix+262, iy+24, "达到上限自动停止调用模型", ui.FsXs, 400, th.TextMute, ui.FaceUI)
 	iy += 64
 
-	c.TextFace(ix, iy, "轮数上限", ui.FsXs, 500, th.TextDim, ui.FaceUI)
+	c.TextFace(ix, iy, "轮数上限（0=默认120）", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	u.TextField("set.rounds", ui.R(ix, iy+18, 96, 32), "", "0")
 	c.TextFace(ix+108, iy, "上下文窗口", ui.FsXs, 500, th.TextDim, ui.FaceUI)
 	u.TextField("set.ctxwin", ui.R(ix+108, iy+18, 104, 32), "", "128000")

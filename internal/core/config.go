@@ -226,10 +226,9 @@ type Config struct {
 	MaxCost      float64 `json:"max_cost"`      // 单会话累计花费上限（美元）
 	BudgetTokens int     `json:"budget_tokens"` // 单会话累计 token 上限
 	BudgetWarn   bool    `json:"budget_warn"`   // 达到 80% 时是否提示
-	// MaxToolRounds 单次请求内的工具循环轮数上限。0（默认）表示不限制：
-	// 大重构动辄上百次工具调用，用轮数猜任务大小只会把正常任务掐断。
-	// 真正的护栏是上面的花费/token 上限，以及"同一错误反复出现"的自动拦截。
-	// 设成正数时，撞顶不会失败，而是暂停问用户要不要继续（同意则翻倍）。
+	// MaxToolRounds 单次请求内的工具循环轮数上限。0（默认）表示使用
+	// DefaultToolRounds（120）；正数按用户设置。撞顶不会失败，而是暂停
+	// 问用户要不要继续（同意则翻倍）。
 	MaxToolRounds int `json:"max_tool_rounds,omitempty"`
 	// ContextWindow 模型的上下文窗口（token）。自动压缩阈值按它算：
 	// 换了窗口更大的模型，就不该还沿用旧模型的小阈值。0 = 按 128k 估算。
