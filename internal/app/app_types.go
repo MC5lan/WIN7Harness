@@ -321,8 +321,12 @@ type App struct {
 	// 表单（引导页 / 设置页）
 	presetIdx int
 	// onbStep 是引导页当前步骤：0 品牌欢迎页，1 连接模型（调试）。
-	onbStep        int
-	testMsg        string
+	onbStep int
+	// onboardScrl/onboardH 是连接模型页内容区滚动：低分辨率 + 高 DPI 下
+	// 表单比卡片高，必须能滚动，否则字段和“开始使用”会重叠。
+	onboardScrl float32
+	onboardH    int32
+	testMsg     string
 	testOK         *bool
 	testing        bool
 	fetchingModels bool
