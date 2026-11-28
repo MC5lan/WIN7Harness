@@ -17,8 +17,10 @@ func TestRunSuite(t *testing.T) {
 	})
 	t.Log("\n" + rep.Text())
 
-	if rep.Total() < 15 {
-		t.Fatalf("用例数 %d，少于预期的 16", rep.Total())
+	// 当前套件 77 项。这里要求至少 70，防止后续误删/禁用用例导致
+	// “自检全绿”但覆盖面悄悄缩水；新增用例不需要同步改这个数字。
+	if rep.Total() < 70 {
+		t.Fatalf("用例数 %d，少于预期的 70（当前套件约 77 项）", rep.Total())
 	}
 	for _, c := range rep.Cases {
 		if c.Status == StatusFail {
