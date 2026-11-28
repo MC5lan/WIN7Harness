@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
@@ -17,6 +18,17 @@ import (
 	"time"
 	"win7harness/internal/core"
 )
+
+// nonceKey 把本次请求的 CSP nonce 传给页面 handler。
+type nonceKey struct{}
+
+func newCSPNonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
 
 // —— 局域网指挥台 ——
 //
@@ -469,7 +481,15 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:")
+		// 页面脚本是内联的：只写 default-src 'self' 会被浏览器按 CSP 拒绝。
+		// 每次请求生成一次性 nonce，页面 handler 把它注入 <script>。
+		nonce := newCSPNonce()
+		csp := "default-src 'self'; style-src 'unsafe-inline'; img-src 'self' data:"
+		if nonce != "" {
+			csp += "; script-src 'nonce-" + nonce + "'"
+			r = r.WithContext(context.WithValue(r.Context(), nonceKey{}, nonce))
+		}
+		w.Header().Set("Content-Security-Policy", csp)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -569,9 +589,13 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	html := indexHTML
+	if nonce, _ := r.Context().Value(nonceKey{}).(string); nonce != "" {
+		html = strings.Replace(html, "<script>", `<script nonce="`+nonce+`">`, 1)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = io.WriteString(w, indexHTML)
+	_, _ = io.WriteString(w, html)
 }
 
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
