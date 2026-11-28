@@ -28,6 +28,8 @@ jobs:
           if ($tag -ne $src) { throw "tag 与 internal/core/config.go 的 Version 不一致" }
       - name: 依赖准入
         run: go run ./cmd/depguard
+      - name: 代码卫生门禁
+        run: python3 scripts/check.py
       - name: 安装 rsrc（图标资源编译器）
         run: |
           go install github.com/akavel/rsrc@v0.10.2
